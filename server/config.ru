@@ -1,6 +1,6 @@
 require 'thread'
 
-MAX_REQUESTS = 5
+MAX_REQUESTS = 4500
 limit_left = MAX_REQUESTS.to_f
 last_request = Time.now
 rate_of_limit_gain = limit_left / 3600
@@ -8,10 +8,13 @@ mutex = Mutex.new
 
 app = -> (env) do
   mutex.synchronize do
-    limit_left -= 1
+    limit_left -= 1 if limit_left > 0
+
     if limit_left < MAX_REQUESTS
-      time_diff = Time.now - last_request
-      last_request += time_diff
+      current_request = Time.now
+      time_diff = current_request - last_request
+      last_request = current_request
+      puts "current: #{current_request}, last: #{last_request} Time Left: #{limit_left} diff between requests: #{time_diff} addition: #{limit_left + time_diff * rate_of_limit_gain}"
       limit_left = [limit_left + time_diff * rate_of_limit_gain, MAX_REQUESTS].min
     end
   end
