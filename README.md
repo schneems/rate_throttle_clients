@@ -1,4 +1,4 @@
-# Rate Limit Demo
+# Rate Limit GCRA Client Demo
 
 ## What
 
@@ -10,16 +10,18 @@ That's where this demo comes in. It includes a server that implements a crude ve
 
 The goal of the client is to throttle itself without complete information (knowing the total number of clients).
 
+The only thing that this client library has to assume is the maximum number of requests available (4,500 in this case).
+
 ## How
 
 To accomplish throttling the client will sleep for a period of time before it makes a request. When there is lots of capacity and few clients then the sleep time should be small. When there is little capacity or many clients (imagine a world where there were 4,500 clients then they can all only make 1 request per hour) then it must sleep for a longer time to wait for requests to be refilled.
 
-This client uses a similar algorithm to TCP congestion control, though backwards. The rate at which it sleeps is decreased linearly over time as requests are successful, then when a rate limit is hit the value is increased multiplicitively
+If we knew exactly how many clients there were then we could use that information to determine the perfect amount of time to sleep before making a request. Instead we can try to guess how many clients there are and sleep for that same amount of time and adjust this value when a rate limit event occurs or when a request is successful:
 
-The idea is that we want to minimize the number of rejected requests from the server (since rejecting requests is not completely free) but we also don't want to leave excess capacity on the floor by sleeping for too long.
+- When a request hits a rate limit then double the number of clients it assumes exist
+- When a request is successful subtract from the number of clients it assumes exist
 
-
-
+Instead of a linear reduction, I chose to have the rate of reduction decrease as the number of remaining requests reported by the API is reduced, so if there are 4500 remaining there will be a large reduction, and if there is 1 remaining there will be a tiny reduction. Instead of a sawtooth pattern, this should produce a logarithmic decrease.
 
 ## Run
 
@@ -34,10 +36,23 @@ $ puma
 $ ruby client/script.rb
 ```
 
-## Questions/Issues
+Observe the clients eat up the capacity and rate limit themsleves:
 
-The rate at which the increase and decrease happens can be tuned as well as the starting sleep rate. Ideally if you boot a single client that only needs to make a handful of requests every hour, you don't want it to take 24 hours to realize it doesn't need to sleep at all. Conversely if you boot many processes with say 500 clients and making requests constantly, you don't want them to increase sleep time so fast that it cannot reasonably come back down, you also dont want it to be too "flappy" by decreasing the sleep time too fast which would trigger the increase logic.
+```
+13946#70249664000540: #status=200 #client_guess=7.570666666672482 #remaining=74 #sleep_for=6.1632330591539715
+13946#70249664000400: #status=200 #client_guess=7.554222222228037 #remaining=73 #sleep_for=6.097463071915681
+13946#70249664000260: #status=200 #client_guess=7.538000000005815 #remaining=72 #sleep_for=6.62650640512892
+13946#70249664000680: #status=200 #client_guess=7.522000000005815 #remaining=78 #sleep_for=6.627982984389338
+13946#70249664000840: #status=200 #client_guess=7.504666666672482 #remaining=78 #sleep_for=6.312446465633488
+13946#70249664000540: #status=200 #client_guess=7.487333333339149 #remaining=77 #sleep_for=6.465234230526173
+13946#70249664000260: #status=200 #client_guess=7.4702222222280374 #remaining=76 #sleep_for=6.227334414609264
+13946#70249664000400: #status=200 #client_guess=7.453333333339149 #remaining=75 #sleep_for=6.61480005482600
+```
 
-At the time of this writing the rates are:
+You can adjust the number of threads and processes via env vars.
 
-- When a successful request happens decrease by `\<number of requests left\>/4500`
+## Notes
+
+Adding jitter seems to be hugely helpful to spreading out requests, without it then all of the sawtooth patterns overlap and it increases the number of concurrent requests that the server must handle.
+
+I played around with different jitter values. I decided making it proportional based on the current sleep value was reasonable. From zero to 1% was not enough jitter, 0 to 10% seems reasonable but it still a magic number.
