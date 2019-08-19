@@ -20,7 +20,7 @@ app = -> (env) do
   end
 
   remaining = [limit_left.floor, 0].max
-  headers = { "RateLimit-Remaining" => remaining, "Content-Type" => "text/plain" }
+  headers = { "RateLimit-Remaining" => remaining, "RateLimit-Multiplier" => 1, "Content-Type" => "text/plain" }
   if remaining <= 0
     status = 429
     body = "!!!!! Nope !!!!!"
