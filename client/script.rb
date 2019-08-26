@@ -15,6 +15,7 @@ module RateLimit
   @monitor = Monitor.new # Reentrant mutex
   @sleep_for = 0.0
   @rate_limit_count = 0
+  @times_retried = 0
 
   def self.log(req)
     @monitor.synchronize do
@@ -54,12 +55,17 @@ module RateLimit
         # and we should try using that value first before we try bumping it.
         if rate_limit_count == @rate_limit_count
           @sleep_for += MIN_SLEEP if @sleep_for <= 0
-          @sleep_for *= 2
+          # First retry request, only increase sleep value if retry doesn't work.
+          # Should guard against run-away high sleep values
+          @sleep_for *= 2 if @times_retried != 0
+          @times_retried += 1
+
           @rate_limit_count += 1
         end
 
         # Retry the request with the new sleep value
         req = self.call(&block)
+        @times_retried = 0
       else
         # The fewer available requests, the slower we should reduce our client guess.
         # We want this to converge and linger around a correct value rather than
