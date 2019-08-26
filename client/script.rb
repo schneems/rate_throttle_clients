@@ -1,15 +1,26 @@
 require 'monitor'
 require 'excon'
 
+require 'date'
+require 'pathname'
+require 'fileutils'
+LOG_DIR = Pathname.new(__FILE__).join("../logs/clients/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
+FileUtils.mkdir_p(LOG_DIR)
+
 CLIENT_COUNT = ENV.fetch("CLIENT_COUNT") { 5 }.to_i
 PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
-
 module RateLimit
   MAX_LIMIT = 4500.to_f
   MIN_SLEEP = 1/(MAX_LIMIT / 3600)
   @monitor = Monitor.new # Reentrant mutex
   @sleep_for = 0.0
   @rate_limit_count = 0
+
+  def self.log(req)
+    @monitor.synchronize do
+      File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
+    end
+  end
 
   def self.call(&block)
     rate_limit_count = @rate_limit_count
@@ -27,6 +38,7 @@ module RateLimit
     status_string << "#remaining=#{remaining} "
     status_string << "#sleep_for=#{@sleep_for} "
     puts status_string
+    log(req)
 
     @monitor.synchronize do
       if req.status == 429
@@ -80,15 +92,12 @@ def spawn_threads
   threads.map(&:join)
 end
 
-def spawn_processes
-  PROCESS_COUNT.times.each do
-    fork do
-      spawn_threads
-    end
+PROCESS_COUNT.times.each do
+  fork do
+    LOG_FILE = LOG_DIR.join(Process.pid.to_s).to_s
+    spawn_threads
   end
-
-  Process.waitall
 end
 
-spawn_processes
+Process.waitall
 
