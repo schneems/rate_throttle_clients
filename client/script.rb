@@ -15,6 +15,7 @@ module RateLimit
   @arrival_rate = MAX_LIMIT
   @client_guess = nil
   @rate_limit_count = 0
+  @multiplier = 1
 
   def self.sleep_for_client_count
     return 0 if @client_guess.nil?
@@ -67,8 +68,9 @@ module RateLimit
           @client_guess *= 2
           @rate_limit_count += 1
 
-          multiplier = req.headers["RateLimit-Multiplier"].to_f
-          @arrival_rate = multiplier * MAX_LIMIT
+          @multiplier = req.headers.fetch("RateLimit-Multiplier") { @multiplier }.to_f
+
+          @arrival_rate = @multiplier * MAX_LIMIT
         end
 
         # Retry the request with the new sleep value
