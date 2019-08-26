@@ -32,7 +32,7 @@ module RateLimit
     end
   end
 
-  def self.call(&block)
+  def self.call(times_retried = 0, &block)
     rate_limit_count = @rate_limit_count
 
     sleep_for = sleep_for_client_count
@@ -64,9 +64,12 @@ module RateLimit
         # request then it means another thread has already increased the client guess
         # and we should try using that value first before we try bumping it.
         if rate_limit_count == @rate_limit_count
-          @client_guess ||= 1
-          @client_guess *= 2
+          @client_guess ||= 0
+          @client_guess += 1
           @rate_limit_count += 1
+
+          # First retry with current sleep value, only when it's not enough increase
+          @client_guess *= 2 if times_retried != 0
 
           @multiplier = req.headers.fetch("RateLimit-Multiplier") { @multiplier }.to_f
 
@@ -74,12 +77,15 @@ module RateLimit
         end
 
         # Retry the request with the new sleep value
-        req = self.call(&block)
+        req = self.call(times_retried + 1, &block)
       else
         # The fewer available requests, the slower we should reduce our client guess.
         # We want this to converge and linger around a correct value rather than
         # being a true sawtooth pattern.
-        @client_guess -= remaining / MAX_LIMIT if @client_guess
+        if @client_guess
+          @client_guess -= remaining / MAX_LIMIT
+          @client_guess = 0 if @client_guess < 0
+        end
       end
     end
 
