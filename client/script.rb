@@ -14,7 +14,7 @@ module RateLimit
   @monitor = Monitor.new # Reentrant mutex
   @arrival_rate = MAX_LIMIT
   @client_guess = nil
-  @rate_limit = 0
+  @rate_limit_count = 0
 
   def self.sleep_for_client_count
     return 0 if @client_guess.nil?
@@ -32,7 +32,7 @@ module RateLimit
   end
 
   def self.call(&block)
-    rate_limit_count = @rate_limit
+    rate_limit_count = @rate_limit_count
 
     sleep_for = sleep_for_client_count
     sleep(sleep_for)
@@ -62,10 +62,10 @@ module RateLimit
         # If this value is different than the value recorded at the beginning of the
         # request then it means another thread has already increased the client guess
         # and we should try using that value first before we try bumping it.
-        if rate_limit_count == @rate_limit
+        if rate_limit_count == @rate_limit_count
           @client_guess ||= 2
           @client_guess *= 2
-          @rate_limit += 1
+          @rate_limit_count += 1
 
           multiplier = req.headers["RateLimit-Multiplier"].to_f
           @arrival_rate = multiplier * MAX_LIMIT
