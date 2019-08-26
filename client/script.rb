@@ -25,9 +25,9 @@ module RateLimit
     return sleep_for + jitter
   end
 
-  def self.log(req)
+  def self.log(req, sleep_for)
     @monitor.synchronize do
-      File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
+      File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{sleep_for.to_s}") }
     end
   end
 
@@ -48,7 +48,7 @@ module RateLimit
     status_string << "#remaining=#{remaining} "
     status_string << "#sleep_for=#{sleep_for} "
     puts status_string
-    log(req)
+    log(req, sleep_for)
 
     @monitor.synchronize do
       if req.status == 429
