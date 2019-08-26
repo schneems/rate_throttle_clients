@@ -6,25 +6,16 @@ PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
 
 module RateLimit
   MAX_LIMIT = 4500.to_f
+  MIN_SLEEP = 1/(MAX_LIMIT / 3600)
   @monitor = Monitor.new # Reentrant mutex
-  @arrival_rate = MAX_LIMIT
-  @client_guess = nil
-  @rate_limit = 0
-
-  def self.sleep_for_client_count
-    return 0 if @client_guess.nil?
-    return 0 if @client_guess < 0
-
-    sleep_for = @client_guess * 1/(@arrival_rate / 3600)
-    jitter = sleep_for * rand(0.0..0.1)
-    return sleep_for + jitter
-  end
+  @sleep_for = 0.0
+  @rate_limit_count = 0
 
   def self.call(&block)
-    rate_limit_count = @rate_limit
+    rate_limit_count = @rate_limit_count
 
-    sleep_for = sleep_for_client_count
-    sleep(sleep_for)
+    jitter = @sleep_for * rand(0.0..0.1)
+    sleep(@sleep_for + jitter)
 
     req = yield
 
@@ -33,9 +24,8 @@ module RateLimit
     status_string = String.new("")
     status_string << "#{Process.pid}##{Thread.current.object_id}: "
     status_string << "#status=#{req.status} "
-    status_string << "#client_guess=#{@client_guess || 0} "
     status_string << "#remaining=#{remaining} "
-    status_string << "#sleep_for=#{sleep_for} "
+    status_string << "#sleep_for=#{@sleep_for} "
     puts status_string
 
     @monitor.synchronize do
@@ -50,13 +40,10 @@ module RateLimit
         # If this value is different than the value recorded at the beginning of the
         # request then it means another thread has already increased the client guess
         # and we should try using that value first before we try bumping it.
-        if rate_limit_count == @rate_limit
-          @client_guess ||= 2
-          @client_guess *= 2
-          @rate_limit += 1
-
-          multiplier = req.headers["RateLimit-Multiplier"].to_f
-          @arrival_rate = multiplier * MAX_LIMIT
+        if rate_limit_count == @rate_limit_count
+          @sleep_for += MIN_SLEEP if @sleep_for <= 0
+          @sleep_for *= 2
+          @rate_limit_count += 1
         end
 
         # Retry the request with the new sleep value
@@ -65,7 +52,8 @@ module RateLimit
         # The fewer available requests, the slower we should reduce our client guess.
         # We want this to converge and linger around a correct value rather than
         # being a true sawtooth pattern.
-        @client_guess -= remaining / MAX_LIMIT if @client_guess
+        @sleep_for -= remaining/MAX_LIMIT * MIN_SLEEP
+        @sleep_for = 0 if @sleep_for <= 0
       end
     end
 
