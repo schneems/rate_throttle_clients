@@ -63,7 +63,7 @@ module RateLimit
         # request then it means another thread has already increased the client guess
         # and we should try using that value first before we try bumping it.
         if rate_limit_count == @rate_limit_count
-          @client_guess ||= 2
+          @client_guess ||= 1
           @client_guess *= 2
           @rate_limit_count += 1
 
