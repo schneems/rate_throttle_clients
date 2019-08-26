@@ -54,7 +54,6 @@ module RateLimit
         # request then it means another thread has already increased the client guess
         # and we should try using that value first before we try bumping it.
         if rate_limit_count == @rate_limit_count
-          @sleep_for += MIN_SLEEP if @sleep_for <= 0
           # First retry request, only increase sleep value if retry doesn't work.
           # Should guard against run-away high sleep values
           @sleep_for *= 2 if @times_retried != 0
