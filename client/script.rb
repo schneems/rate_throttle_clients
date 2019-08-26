@@ -13,7 +13,7 @@ module RateLimit
   MAX_LIMIT = 4500.to_f
   MIN_SLEEP = 1/(MAX_LIMIT / 3600)
   @monitor = Monitor.new # Reentrant mutex
-  @sleep_for = 0.0
+  @sleep_for = MIN_SLEEP
   @rate_limit_count = 0
   @times_retried = 0
 
@@ -71,7 +71,7 @@ module RateLimit
         # We want this to converge and linger around a correct value rather than
         # being a true sawtooth pattern.
         @sleep_for -= MIN_SLEEP * (remaining/MAX_LIMIT) ** 2
-        @sleep_for = 0 if @sleep_for < 0
+        @sleep_for = MIN_SLEEP if @sleep_for < 0
       end
     end
 
