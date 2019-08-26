@@ -65,7 +65,7 @@ module RateLimit
         # We want this to converge and linger around a correct value rather than
         # being a true sawtooth pattern.
         @sleep_for -= remaining/MAX_LIMIT * MIN_SLEEP
-        @sleep_for = 0 if @sleep_for <= 0
+        @sleep_for = 0 if @sleep_for < 0
       end
     end
 
