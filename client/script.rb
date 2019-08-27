@@ -16,65 +16,78 @@ module RateLimit
   @sleep_for = 2 * MIN_SLEEP
   @rate_limit_count = 0
   @times_retried = 0
-
-  def self.log(req)
-    @monitor.synchronize do
-      File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
-    end
-  end
+  @retry_thread = nil
 
   def self.call(&block)
-    rate_limit_count = @rate_limit_count
-
     jitter = @sleep_for * rand(0.0..0.1)
     sleep(@sleep_for + jitter)
 
     req = yield
 
-    remaining = req.headers["RateLimit-Remaining"].to_i
+    log(req)
 
+    if retry_request?(req)
+      req = retry_request_logic(&block)
+      return req
+    else
+      decrement_logic(req)
+      return req
+    end
+  end
+
+  # The fewer available requests, the slower we should reduce our client guess.
+  # We want this to converge and linger around a correct value rather than
+  # being a true sawtooth pattern.
+  def self.decrement_logic(req)
+    @monitor.synchronize do
+      remaining = req.headers["RateLimit-Remaining"].to_i
+
+      @sleep_for -= (remaining/(10*MAX_LIMIT/@sleep_for))
+      @sleep_for = MIN_SLEEP if @sleep_for < 0
+    end
+  end
+
+  def self.retry_request_logic(&block)
+    i_am_retrying = false
+    @monitor.synchronize do
+      if @retry_thread_id.nil? || @retry_thread == Thread.current
+        # First retry request, only increase sleep value if retry doesn't work.
+        # Should guard against run-away high sleep values
+        @sleep_for *= 2 if @times_retried != 0
+
+        @times_retried += 1
+        @retry_thread = Thread.current
+        i_am_retrying = true
+      end
+    end
+
+    # Retry the request with the new sleep value
+    req = self.call(&block)
+    if i_am_retrying
+      @monitor.synchronize do
+        @times_retried = 0
+        @retry_thread = nil
+      end
+    end
+    return req
+  end
+
+  def self.retry_request?(req)
+    req.status == 429
+  end
+
+  def self.log(req)
+    @monitor.synchronize do
+      File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
+    end
+
+    remaining = req.headers["RateLimit-Remaining"].to_i
     status_string = String.new("")
     status_string << "#{Process.pid}##{Thread.current.object_id}: "
     status_string << "#status=#{req.status} "
     status_string << "#remaining=#{remaining} "
     status_string << "#sleep_for=#{@sleep_for} "
     puts status_string
-    log(req)
-
-    @monitor.synchronize do
-      if req.status == 429
-        # This was tough to figure out
-        #
-        # Basically when we hit a rate limiting event, we don't want all
-        # threads to be increasing the guess size, really just the first client
-        # to do the job of figuring how much it should slow down. The other jobs
-        # should sit and wait for a number they can try.
-        #
-        # If this value is different than the value recorded at the beginning of the
-        # request then it means another thread has already increased the client guess
-        # and we should try using that value first before we try bumping it.
-        if rate_limit_count == @rate_limit_count
-          # First retry request, only increase sleep value if retry doesn't work.
-          # Should guard against run-away high sleep values
-          @sleep_for *= 2 if @times_retried != 0
-          @times_retried += 1
-
-          @rate_limit_count += 1
-        end
-
-        # Retry the request with the new sleep value
-        req = self.call(&block)
-        @times_retried = 0
-      else
-        # The fewer available requests, the slower we should reduce our client guess.
-        # We want this to converge and linger around a correct value rather than
-        # being a true sawtooth pattern.
-        @sleep_for -= remaining/MAX_LIMIT
-        @sleep_for = MIN_SLEEP if @sleep_for < 0
-      end
-    end
-
-    return req
   end
 end
 
