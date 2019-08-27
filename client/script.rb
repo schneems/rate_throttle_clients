@@ -69,7 +69,7 @@ module RateLimit
         # The fewer available requests, the slower we should reduce our client guess.
         # We want this to converge and linger around a correct value rather than
         # being a true sawtooth pattern.
-        @sleep_for -= MIN_SLEEP * (remaining/MAX_LIMIT) ** 2
+        @sleep_for -= remaining/MAX_LIMIT
         @sleep_for = MIN_SLEEP if @sleep_for < 0
       end
     end
