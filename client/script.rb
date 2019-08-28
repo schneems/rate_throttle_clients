@@ -42,7 +42,7 @@ module RateLimit
     @monitor.synchronize do
       remaining = req.headers["RateLimit-Remaining"].to_i
 
-      @sleep_for -= (remaining/(100*MAX_LIMIT/@sleep_for))
+      @sleep_for -= (remaining/(@rate_limit_count*MAX_LIMIT/@sleep_for))
       @sleep_for = MIN_SLEEP if @sleep_for < 0
     end
   end
