@@ -40,10 +40,10 @@ module RateLimit
   # being a true sawtooth pattern.
   def self.decrement_logic(req)
     @monitor.synchronize do
-      remaining = req.headers["RateLimit-Remaining"].to_i
+      ratelimit_remaining = req.headers["RateLimit-Remaining"].to_i
 
-      @sleep_for -= (remaining/(@rate_limit_count*MAX_LIMIT/@sleep_for))
       @sleep_for = MIN_SLEEP if @sleep_for < 0
+      @sleep_for -= (ratelimit_remaining*@sleep_for)/(@rate_limit_count*MAX_LIMIT)
     end
   end
 
