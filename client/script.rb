@@ -18,7 +18,7 @@ module RateLimit
   @rate_limit_count = 1
   @times_retried = 0
   @retry_thread = nil
-  @min_sleep_bound = MIN_SLEEP
+  @min_sleep_bound = MIN_SLEEP * MIN_SLEEP_OVERTIME_PERCENT
   @rate_multiplier = 1
 
   def self.call(&block)
