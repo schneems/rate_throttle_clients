@@ -12,11 +12,14 @@ PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
 module RateLimit
   MAX_LIMIT = 4500.to_f
   MIN_SLEEP = 1/(MAX_LIMIT / 3600)
+  MIN_SLEEP_OVERTIME_PERCENT = 1.0 - 0.45 # Allow min sleep to go lower than actually calculated value, must be less than 1
   @monitor = Monitor.new # Reentrant mutex
   @sleep_for = 2 * MIN_SLEEP
   @rate_limit_count = 1
   @times_retried = 0
   @retry_thread = nil
+  @min_sleep_bound = MIN_SLEEP
+  @rate_multiplier = 1
 
   def self.call(&block)
     jitter = @sleep_for * rand(0.0..0.1)
@@ -27,7 +30,7 @@ module RateLimit
     log(req)
 
     if retry_request?(req)
-      req = retry_request_logic(&block)
+      req = retry_request_logic(req, &block)
       return req
     else
       decrement_logic(req)
@@ -42,14 +45,18 @@ module RateLimit
     @monitor.synchronize do
       ratelimit_remaining = req.headers["RateLimit-Remaining"].to_i
 
-      @sleep_for = MIN_SLEEP if @sleep_for < 0
       @sleep_for -= (ratelimit_remaining*@sleep_for)/(@rate_limit_count*MAX_LIMIT)
+      @sleep_for = @min_sleep_bound if @sleep_for < @min_sleep_bound
     end
   end
 
-  def self.retry_request_logic(&block)
+  def self.retry_request_logic(req, &block)
     @monitor.synchronize do
       if @retry_thread.nil? || @retry_thread == Thread.current
+        @rate_multiplier = req.headers.fetch("RateLimit-Multiplier") { @rate_multiplier }.to_f
+        @min_sleep_bound = (1/(@rate_multiplier * MAX_LIMIT / 3600))
+        @min_sleep_bound *= MIN_SLEEP_OVERTIME_PERCENT
+
         # First retry request, only increase sleep value if retry doesn't work.
         # Should guard against run-away high sleep values
         if @times_retried != 0
