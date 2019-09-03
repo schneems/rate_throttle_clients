@@ -12,7 +12,7 @@ PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
 module RateLimit
   MAX_LIMIT = 4500.to_f
   MIN_SLEEP = 1/(MAX_LIMIT / 3600)
-  MIN_SLEEP_OVERTIME_PERCENT = 1.0 - 0.45 # Allow min sleep to go lower than actually calculated value, must be less than 1
+  MIN_SLEEP_OVERTIME_PERCENT = 1.0 - 0.9 # Allow min sleep to go lower than actually calculated value, must be less than 1
   @mutex = Mutex.new
   @sleep_for = 2 * MIN_SLEEP
   @rate_limit_count = 1
