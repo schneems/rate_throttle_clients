@@ -13,7 +13,7 @@ module RateLimit
   MAX_LIMIT = 4500.to_f
   MIN_SLEEP = 1/(MAX_LIMIT / 3600)
   MIN_SLEEP_OVERTIME_PERCENT = 1.0 - 0.45 # Allow min sleep to go lower than actually calculated value, must be less than 1
-  @monitor = Monitor.new # Reentrant mutex
+  @mutex = Mutex.new
   @sleep_for = 2 * MIN_SLEEP
   @rate_limit_count = 1
   @times_retried = 0
@@ -42,7 +42,7 @@ module RateLimit
   # We want this to converge and linger around a correct value rather than
   # being a true sawtooth pattern.
   def self.decrement_logic(req)
-    @monitor.synchronize do
+    @mutex.synchronize do
       ratelimit_remaining = req.headers["RateLimit-Remaining"].to_i
 
       @sleep_for -= (ratelimit_remaining*@sleep_for)/(@rate_limit_count*MAX_LIMIT)
@@ -51,7 +51,7 @@ module RateLimit
   end
 
   def self.retry_request_logic(req, &block)
-    @monitor.synchronize do
+    @mutex.synchronize do
       if @retry_thread.nil? || @retry_thread == Thread.current
         @rate_multiplier = req.headers.fetch("RateLimit-Multiplier") { @rate_multiplier }.to_f
         @min_sleep_bound = (1/(@rate_multiplier * MAX_LIMIT / 3600))
@@ -72,7 +72,7 @@ module RateLimit
     # Retry the request with the new sleep value
     req = self.call(&block)
     if @retry_thread == Thread.current
-      @monitor.synchronize do
+      @mutex.synchronize do
         @times_retried = 0
         @retry_thread = nil
       end
@@ -85,7 +85,7 @@ module RateLimit
   end
 
   def self.log(req)
-    @monitor.synchronize do
+    @mutex.synchronize do
       File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
     end
 
