@@ -9,9 +9,9 @@ LOG_FILE = LOG_DIR.join(Process.pid.to_s)
 @rate_limit_count = 0
 
 MAX_REQUESTS = 4500
-limit_left = MAX_REQUESTS.to_f
+limit_left = 500.to_f
 last_request = Time.now
-rate_of_limit_gain = limit_left / 3600
+rate_of_limit_gain = MAX_REQUESTS / 3600.to_f
 mutex = Mutex.new
 
 app = -> (env) do
@@ -28,16 +28,16 @@ app = -> (env) do
 
     remaining = [limit_left.floor, 0].max
     @rate_limit_count += 1 if remaining <= 0
-    File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@rate_limit_count.to_s}") }
+    # File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@rate_limit_count.to_s}") }
   end
 
-  headers = { "RateLimit-Remaining" => remaining, "RateLimit-Multiplier" => 1, "Content-Type" => "text/plain" }
+  headers = { "RateLimit-Remaining" => remaining, "RateLimit-Multiplier" => 1, "Content-Type" => "text/plain".freeze }
   if remaining <= 0
     status = 429
-    body = "!!!!! Nope !!!!!"
+    body = "!!!!! Nope !!!!!".freeze
   else
     status = 200
-    body = "<3<3<3 Hello world <3<3<3"
+    body = "<3<3<3 Hello world <3<3<3".freeze
   end
 
   return [status, headers, [body]]

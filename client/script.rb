@@ -20,6 +20,7 @@ module RateLimit
   @retry_thread = nil
   @min_sleep_bound = MIN_SLEEP * MIN_SLEEP_OVERTIME_PERCENT
   @rate_multiplier = 1
+  @rate_limit_multiply_at = Time.now - 1800
 
   def self.call(&block)
     jitter = @sleep_for * rand(0.0..0.1)
@@ -38,14 +39,21 @@ module RateLimit
     end
   end
 
-  # The fewer available requests, the slower we should reduce our client guess.
-  # We want this to converge and linger around a correct value rather than
-  # being a true sawtooth pattern.
   def self.decrement_logic(req)
     @mutex.synchronize do
       ratelimit_remaining = req.headers["RateLimit-Remaining"].to_i
 
-      @sleep_for -= (ratelimit_remaining*@sleep_for)/(@rate_limit_count*MAX_LIMIT)
+      # The goal of this logic is to balance out rate limiting events,
+      # to prevent one single "flappy" client.
+      #
+      # When a client was recently rate limitied the time factor will be high.
+      # This is used to slow down the decrement logic so that other clients that
+      # have not hit a rate limit in a long time can come down.
+      # Equation is based on exponential decay
+      seconds_since_last_multiply = Time.now - @rate_limit_multiply_at
+      time_factor = 1.0/(1.0 - Math::E ** -(seconds_since_last_multiply/4500.0))
+
+      @sleep_for -= (ratelimit_remaining*@sleep_for)/(time_factor*MAX_LIMIT)
       @sleep_for = @min_sleep_bound if @sleep_for < @min_sleep_bound
     end
   end
@@ -54,7 +62,7 @@ module RateLimit
     @mutex.synchronize do
       if @retry_thread.nil? || @retry_thread == Thread.current
         @rate_multiplier = req.headers.fetch("RateLimit-Multiplier") { @rate_multiplier }.to_f
-        @min_sleep_bound = (1/(@rate_multiplier * MAX_LIMIT / 3600))
+        @min_sleep_bound = (1/(@rate_multiplier * MAX_LIMIT / 4500))
         @min_sleep_bound *= MIN_SLEEP_OVERTIME_PERCENT
 
         # First retry request, only increase sleep value if retry doesn't work.
@@ -62,6 +70,7 @@ module RateLimit
         if @times_retried != 0
           @sleep_for *= 2
           @rate_limit_count += 1
+          @rate_limit_multiply_at = Time.now
         end
 
         @times_retried += 1
@@ -89,12 +98,14 @@ module RateLimit
       File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
     end
 
+    seconds_since_last_multiply = Time.now - @rate_limit_multiply_at
     remaining = req.headers["RateLimit-Remaining"].to_i
     status_string = String.new("")
     status_string << "#{Process.pid}##{Thread.current.object_id}: "
     status_string << "#status=#{req.status} "
     status_string << "#remaining=#{remaining} "
     status_string << "#rate_limit_count=#{@rate_limit_count} "
+    status_string << "#seconds_since_last_multiply=#{seconds_since_last_multiply.ceil} "
     status_string << "#sleep_for=#{@sleep_for} "
     puts status_string
   end
