@@ -277,7 +277,6 @@ Behavior I want to test;
 
 Can do:
 
-- Check when rate limit is triggered, the time since multiply changes
 - Check when time since multiply changes the decrease amount changes
 - When remaining changes decrease amount changes
 -
