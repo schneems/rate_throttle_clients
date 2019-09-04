@@ -72,5 +72,20 @@ describe 'Heroku client throttle' do
       expect(decrement_one < decrement_two).to be_truthy
       expect(decrement_two < decrement_three).to be_truthy
     end
+
+    it "sleep_for causes proportional rate reduction" do
+      client = HerokuClientThrottle.new
+      @mock_time = Time.now
+
+      def client.sleep_for; 1; end
+      decrement_one = client.decrement_amount(FakeResponse.new, @mock_time)
+
+      def client.sleep_for; 10; end
+      decrement_two = client.decrement_amount(FakeResponse.new, @mock_time)
+
+      expect(decrement_one < decrement_two).to be_truthy
+
+      expect(decrement_two).to be_between(decrement_one * 9.9, decrement_one * 10.1)
+    end
   end
 end

@@ -49,7 +49,7 @@ class HerokuClientThrottle
     seconds_since_last_multiply = (time_now - self.rate_limit_multiply_at) + 1 # avoid case where current time is also recorded multiply time
     time_factor = 1.0/(1.0 - Math::E ** -(seconds_since_last_multiply/4500.0))
 
-    return (ratelimit_remaining*@sleep_for)/(time_factor*MAX_LIMIT)
+    return (ratelimit_remaining*self.sleep_for)/(time_factor*MAX_LIMIT)
   end
 
   def decrement_logic(req)
