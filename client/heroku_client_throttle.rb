@@ -36,21 +36,25 @@ class HerokuClientThrottle
     end
   end
 
+  def decrement_amount(req, time_now = Time.now)
+    ratelimit_remaining = req.headers["RateLimit-Remaining"].to_i
+
+    # The goal of this logic is to balance out rate limiting events,
+    # to prevent one single "flappy" client.
+    #
+    # When a client was recently rate limitied the time factor will be high.
+    # This is used to slow down the decrement logic so that other clients that
+    # have not hit a rate limit in a long time can come down.
+    # Equation is based on exponential decay
+    seconds_since_last_multiply = (time_now - self.rate_limit_multiply_at) + 1 # avoid case where current time is also recorded multiply time
+    time_factor = 1.0/(1.0 - Math::E ** -(seconds_since_last_multiply/4500.0))
+
+    return (ratelimit_remaining*@sleep_for)/(time_factor*MAX_LIMIT)
+  end
+
   def decrement_logic(req)
     @mutex.synchronize do
-      ratelimit_remaining = req.headers["RateLimit-Remaining"].to_i
-
-      # The goal of this logic is to balance out rate limiting events,
-      # to prevent one single "flappy" client.
-      #
-      # When a client was recently rate limitied the time factor will be high.
-      # This is used to slow down the decrement logic so that other clients that
-      # have not hit a rate limit in a long time can come down.
-      # Equation is based on exponential decay
-      seconds_since_last_multiply = Time.now - @rate_limit_multiply_at
-      time_factor = 1.0/(1.0 - Math::E ** -(seconds_since_last_multiply/4500.0))
-
-      @sleep_for -= (ratelimit_remaining*@sleep_for)/(time_factor*MAX_LIMIT)
+      @sleep_for -= decrement_amount(req)
       @sleep_for = @min_sleep_bound if @sleep_for < @min_sleep_bound
     end
   end
