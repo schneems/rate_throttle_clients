@@ -5,3 +5,5 @@ gem "puma"
 gem "rack"
 gem 'gruff'
 gem 'rubyvis'
+gem 'rspec'
+gem 'rake'

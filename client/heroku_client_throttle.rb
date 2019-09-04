@@ -1,28 +1,25 @@
-require 'monitor'
-require 'excon'
-
+require 'thread'
 require 'date'
-require 'pathname'
-require 'fileutils'
-LOG_DIR = Pathname.new(__FILE__).join("../../logs/clients/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
-FileUtils.mkdir_p(LOG_DIR)
 
-CLIENT_COUNT = ENV.fetch("CLIENT_COUNT") { 5 }.to_i
-PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
-module RateLimit
+class HerokuClientThrottle
   MAX_LIMIT = 4500.to_f
   MIN_SLEEP = 1/(MAX_LIMIT / 3600)
   MIN_SLEEP_OVERTIME_PERCENT = 1.0 - 0.9 # Allow min sleep to go lower than actually calculated value, must be less than 1
-  @mutex = Mutex.new
-  @sleep_for = 2 * MIN_SLEEP
-  @rate_limit_count = 1
-  @times_retried = 0
-  @retry_thread = nil
-  @min_sleep_bound = MIN_SLEEP * MIN_SLEEP_OVERTIME_PERCENT
-  @rate_multiplier = 1
-  @rate_limit_multiply_at = Time.now - 1800
 
-  def self.call(&block)
+  attr_reader :rate_limit_multiply_at, :sleep_for
+
+  def initialize
+    @mutex = Mutex.new
+    @sleep_for = 2 * MIN_SLEEP
+    @rate_limit_count = 1
+    @times_retried = 0
+    @retry_thread = nil
+    @min_sleep_bound = MIN_SLEEP * MIN_SLEEP_OVERTIME_PERCENT
+    @rate_multiplier = 1
+    @rate_limit_multiply_at = Time.now - 1800
+  end
+
+  def call(&block)
     jitter = @sleep_for * rand(0.0..0.1)
     sleep(@sleep_for + jitter)
 
@@ -39,7 +36,7 @@ module RateLimit
     end
   end
 
-  def self.decrement_logic(req)
+  def decrement_logic(req)
     @mutex.synchronize do
       ratelimit_remaining = req.headers["RateLimit-Remaining"].to_i
 
@@ -58,7 +55,7 @@ module RateLimit
     end
   end
 
-  def self.retry_request_logic(req, &block)
+  def retry_request_logic(req, &block)
     @mutex.synchronize do
       if @retry_thread.nil? || @retry_thread == Thread.current
         @rate_multiplier = req.headers.fetch("RateLimit-Multiplier") { @rate_multiplier }.to_f
@@ -79,7 +76,7 @@ module RateLimit
     end
 
     # Retry the request with the new sleep value
-    req = self.call(&block)
+    req = call(&block)
     if @retry_thread == Thread.current
       @mutex.synchronize do
         @times_retried = 0
@@ -89,11 +86,11 @@ module RateLimit
     return req
   end
 
-  def self.retry_request?(req)
+  def retry_request?(req)
     req.status == 429
   end
 
-  def self.log(req)
+  def log(req)
     @mutex.synchronize do
       File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
     end
