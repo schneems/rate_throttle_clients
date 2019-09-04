@@ -4,7 +4,7 @@ require 'excon'
 require 'date'
 require 'pathname'
 require 'fileutils'
-LOG_DIR = Pathname.new(__FILE__).join("../logs/clients/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
+LOG_DIR = Pathname.new(__FILE__).join("../../logs/clients/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
 FileUtils.mkdir_p(LOG_DIR)
 
 CLIENT_COUNT = ENV.fetch("CLIENT_COUNT") { 5 }.to_i

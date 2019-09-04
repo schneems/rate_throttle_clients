@@ -3,7 +3,7 @@ require 'thread'
 require 'pathname'
 require 'fileutils'
 require 'date'
-LOG_DIR = Pathname.new(__FILE__).join("../logs/server/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
+LOG_DIR = Pathname.new(__FILE__).join("../../logs/server/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
 FileUtils.mkdir_p(LOG_DIR)
 LOG_FILE = LOG_DIR.join(Process.pid.to_s)
 @rate_limit_count = 0
