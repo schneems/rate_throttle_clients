@@ -28,6 +28,15 @@ logger = ->(req, throttle) do
 end
 CLIENT_THROTTLE = HerokuClientThrottle.new(logger)
 
+if ENV["TIME_SCALE"]
+  require 'timecop'
+  Timecop.scale(ENV["TIME_SCALE"].to_f)
+  TIME_SCALE = ENV["TIME_SCALE"].to_f
+  def CLIENT_THROTTLE.sleep(val)
+    super val/TIME_SCALE
+  end
+end
+
 def run
   loop do
     CLIENT_THROTTLE.call do

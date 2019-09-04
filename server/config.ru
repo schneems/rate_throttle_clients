@@ -14,6 +14,11 @@ last_request = Time.now
 rate_of_limit_gain = MAX_REQUESTS / 3600.to_f
 mutex = Mutex.new
 
+if ENV["TIME_SCALE"]
+  require 'timecop'
+  Timecop.scale(ENV["TIME_SCALE"].to_f)
+end
+
 app = -> (env) do
   remaining = nil
   mutex.synchronize do
