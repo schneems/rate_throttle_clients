@@ -31,6 +31,22 @@ You can boot both the client and the server by executing the main `main.rb`, thi
 $ ruby main.rb
 ```
 
+You can speed up the simulation by running with
+
+```
+$ TIME_SCALE=10 ruby main.rb
+```
+
+> Note: The more you scale time the more inacurate the simulation will be.
+
+You can also tune the number of clients by setting threads and processes. Total client count will be threads * processes, for example:
+
+```
+PROCESS_COUNT=2 THREAD_COUNT=3 ruby main.rb
+```
+
+Would be using 2 * 3 => 6 clients.
+
 Observe the clients eat up the capacity and rate limit themsleves:
 
 ```
@@ -274,5 +290,7 @@ Behavior I want to test;
 - When fast/slow clients both hit a rate limit the "fast" client is more likely to be chosen.
 - Percent/rate of rate limits received by the server is within some reasonable bounds (initial simulations of this behavior look like rate limits account for 2-3% of requests)
 
+TODO:
 
-Can do:
+- Rate multiply headers
+- Minimum sleep value after reduction
