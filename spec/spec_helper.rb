@@ -18,3 +18,17 @@ RSpec.configure do |config|
   config.order = :random
   Kernel.srand config.seed
 end
+
+class FakeResponse
+  attr_reader :status, :headers
+
+  def initialize(status = 200, remaining = 10)
+    @status = status
+
+    @headers = {
+      "RateLimit-Remaining" => remaining,
+      "RateLimit-Multiplier" => 1,
+      "Content-Type" => "text/plain".freeze
+    }
+  end
+end

@@ -6,12 +6,12 @@ class HerokuClientThrottle
   MIN_SLEEP = 1/(MAX_LIMIT / 3600)
   MIN_SLEEP_OVERTIME_PERCENT = 1.0 - 0.9 # Allow min sleep to go lower than actually calculated value, must be less than 1
 
-  attr_reader :rate_limit_multiply_at, :sleep_for
+  attr_reader :rate_limit_multiply_at, :sleep_for, :rate_limit_count
 
   def initialize
     @mutex = Mutex.new
     @sleep_for = 2 * MIN_SLEEP
-    @rate_limit_count = 1
+    @rate_limit_count = 0
     @times_retried = 0
     @retry_thread = nil
     @min_sleep_bound = MIN_SLEEP * MIN_SLEEP_OVERTIME_PERCENT
@@ -25,7 +25,7 @@ class HerokuClientThrottle
 
     req = yield
 
-    log(req)
+    # log(req)
 
     if retry_request?(req)
       req = retry_request_logic(req, &block)
@@ -90,20 +90,20 @@ class HerokuClientThrottle
     req.status == 429
   end
 
-  def log(req)
-    @mutex.synchronize do
-      File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
-    end
+  # def log(req)
+  #   @mutex.synchronize do
+  #     File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
+  #   end
 
-    seconds_since_last_multiply = Time.now - @rate_limit_multiply_at
-    remaining = req.headers["RateLimit-Remaining"].to_i
-    status_string = String.new("")
-    status_string << "#{Process.pid}##{Thread.current.object_id}: "
-    status_string << "#status=#{req.status} "
-    status_string << "#remaining=#{remaining} "
-    status_string << "#rate_limit_count=#{@rate_limit_count} "
-    status_string << "#seconds_since_last_multiply=#{seconds_since_last_multiply.ceil} "
-    status_string << "#sleep_for=#{@sleep_for} "
-    puts status_string
-  end
+  #   seconds_since_last_multiply = Time.now - @rate_limit_multiply_at
+  #   remaining = req.headers["RateLimit-Remaining"].to_i
+  #   status_string = String.new("")
+  #   status_string << "#{Process.pid}##{Thread.current.object_id}: "
+  #   status_string << "#status=#{req.status} "
+  #   status_string << "#remaining=#{remaining} "
+  #   status_string << "#rate_limit_count=#{@rate_limit_count} "
+  #   status_string << "#seconds_since_last_multiply=#{seconds_since_last_multiply.ceil} "
+  #   status_string << "#sleep_for=#{@sleep_for} "
+  #   puts status_string
+  # end
 end
