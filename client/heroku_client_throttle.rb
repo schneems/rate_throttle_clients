@@ -1,14 +1,35 @@
 require 'thread'
-require 'date'
 
+# This class is responsible for making sure requests
+# to the Heroku API do not fail, and do not do not
+# cause excess burden to the API server by delaying
+# requests and spreading them over time.
+#
+# If a request is rate limited, this class will
+# automatically retry the request.
+#
+# High level logic:
+#   - When a rate limit event occurs, double the amount
+#     of time the client sleeps for
+#   - When a request is successful reduce the amount of
+#     of time the client sleeps for by a small amount
+#
+# This logic loosely mimics "congestion avoidance" in TCP.
+#
+# Example Usage:
+#
+#   client = HerokuClientThrottle.new
+#   request = client.call { Excon.get("https://api.heroku.com/<path>")}
+#   request.status #=> 200
+#
 class HerokuClientThrottle
   MAX_LIMIT = 4500.to_f
   MIN_SLEEP = 1/(MAX_LIMIT / 3600)
   MIN_SLEEP_OVERTIME_PERCENT = 1.0 - 0.9 # Allow min sleep to go lower than actually calculated value, must be less than 1
 
-  attr_reader :rate_limit_multiply_at, :sleep_for, :rate_limit_count
+  attr_reader :rate_limit_multiply_at, :sleep_for, :rate_limit_count, :log, :mutex
 
-  def initialize
+  def initialize(log = ->(req, throttle) {})
     @mutex = Mutex.new
     @sleep_for = 2 * MIN_SLEEP
     @rate_limit_count = 0
@@ -17,6 +38,7 @@ class HerokuClientThrottle
     @min_sleep_bound = MIN_SLEEP * MIN_SLEEP_OVERTIME_PERCENT
     @rate_multiplier = 1
     @rate_limit_multiply_at = Time.now - 1800
+    @log = log
   end
 
   def call(&block)
@@ -25,7 +47,7 @@ class HerokuClientThrottle
 
     req = yield
 
-    # log(req)
+    log.call(req, self)
 
     if retry_request?(req)
       req = retry_request_logic(req, &block)
@@ -93,21 +115,4 @@ class HerokuClientThrottle
   def retry_request?(req)
     req.status == 429
   end
-
-  # def log(req)
-  #   @mutex.synchronize do
-  #     File.open(LOG_FILE, 'a') { |f| f.puts("#{DateTime.now.iso8601},#{@sleep_for.to_s}") }
-  #   end
-
-  #   seconds_since_last_multiply = Time.now - @rate_limit_multiply_at
-  #   remaining = req.headers["RateLimit-Remaining"].to_i
-  #   status_string = String.new("")
-  #   status_string << "#{Process.pid}##{Thread.current.object_id}: "
-  #   status_string << "#status=#{req.status} "
-  #   status_string << "#remaining=#{remaining} "
-  #   status_string << "#rate_limit_count=#{@rate_limit_count} "
-  #   status_string << "#seconds_since_last_multiply=#{seconds_since_last_multiply.ceil} "
-  #   status_string << "#sleep_for=#{@sleep_for} "
-  #   puts status_string
-  # end
 end

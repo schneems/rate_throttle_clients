@@ -42,7 +42,6 @@ describe 'Heroku client throttle' do
         .and_return(@mock_time - 200)
       decrement_two = client.decrement_amount(FakeResponse.new, @mock_time)
 
-
       client.stub(:rate_limit_multiply_at)
         .and_return(@mock_time - 2000)
       decrement_three = client.decrement_amount(FakeResponse.new, @mock_time)

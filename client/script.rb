@@ -3,12 +3,30 @@ require_relative 'heroku_client_throttle.rb'
 require 'excon'
 require 'pathname'
 require 'fileutils'
+require 'date'
 LOG_DIR = Pathname.new(__FILE__).join("../../logs/clients/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
 FileUtils.mkdir_p(LOG_DIR)
 
 CLIENT_COUNT = ENV.fetch("CLIENT_COUNT") { 5 }.to_i
 PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
-CLIENT_THROTTLE = HerokuClientThrottle.new
+
+logger = ->(req, throttle) do
+  throttle.mutex.synchronize do
+    File.open(LOG_FILE, 'a') { |f| f.puts("#{throttle.sleep_for.to_s}") }
+  end
+
+  seconds_since_last_multiply = Time.now - throttle.rate_limit_multiply_at
+  remaining = req.headers["RateLimit-Remaining"].to_i
+  status_string = String.new("")
+  status_string << "#{Process.pid}##{Thread.current.object_id}: "
+  status_string << "#status=#{req.status} "
+  status_string << "#remaining=#{remaining} "
+  status_string << "#rate_limit_count=#{throttle.rate_limit_count} "
+  status_string << "#seconds_since_last_multiply=#{seconds_since_last_multiply.ceil} "
+  status_string << "#sleep_for=#{throttle.sleep_for} "
+  puts status_string
+end
+CLIENT_THROTTLE = HerokuClientThrottle.new(logger)
 
 def run
   loop do
@@ -36,4 +54,3 @@ PROCESS_COUNT.times.each do
 end
 
 Process.waitall
-
