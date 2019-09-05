@@ -11,9 +11,9 @@ THREAD_COUNT = ENV.fetch("THREAD_COUNT") { 5 }.to_i
 PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
 
 logger = ->(req, throttle) do
-  throttle.mutex.synchronize do
-    File.open(LOG_FILE, 'a') { |f| f.puts("#{throttle.sleep_for.to_s}") }
-  end
+  # throttle.mutex.synchronize do
+  #   File.open(LOG_FILE, 'a') { |f| f.puts("#{throttle.sleep_for.to_s}") }
+  # end
 
   seconds_since_last_multiply = Time.now - throttle.rate_limit_multiply_at
   remaining = req.headers["RateLimit-Remaining"].to_i
@@ -58,6 +58,15 @@ end
 PROCESS_COUNT.times.each do
   fork do
     LOG_FILE = LOG_DIR.join(Process.pid.to_s).to_s
+    Thread.new do
+      loop do
+        File.open(LOG_FILE, 'a') do |f|
+          f.puts("#{CLIENT_THROTTLE.sleep_for.to_s}")
+        end
+        sleep 1
+      end
+    end
+
     spawn_threads
   end
 end
