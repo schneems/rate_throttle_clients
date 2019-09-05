@@ -270,6 +270,8 @@ Initially I was thinking of this kind of like a PID controller, but i'm not sure
 
 ## How the F to test this?
 
+Right now this is only unit tested. This works well as long as you are confident in the existing logic, but does not work to test the behavior.
+
 This behavior is very hard to test. Why? While the rules are fairly simple (around 100 ish lines of Ruby code for the rate limiter) they have [emergent bevhavior]() that comes from these rules. To make things harder, to really test this emergent behavior, we must `sleep()` which causes code to run for extended periods. To make hard things harder, the code involves syncronizing multiple async clients and requires a server to fully test.
 
 Ideally we would test the "behavior" of the system and not the logic but without the ability to simulate running through an entire day in a few seconds, I don't know how we could do that.
