@@ -25,16 +25,27 @@ Instead of a linear reduction, I chose to have the rate of reduction decrease as
 
 ## Run
 
-In two different client terminal windows boot the server and then the client:
+You can boot both the client and the server by executing the main `main.rb`, this will boot the `server/config.ru` with puma and then run the client `client/script.rb`.
 
 ```
-$ cd server
-$ puma
+$ ruby main.rb
 ```
 
+You can speed up the simulation by running with
+
 ```
-$ ruby client/script.rb
+$ TIME_SCALE=10 ruby main.rb
 ```
+
+> Note: The more you scale time the more inacurate the simulation will be.
+
+You can also tune the number of clients by setting threads and processes. Total client count will be threads * processes, for example:
+
+```
+PROCESS_COUNT=2 THREAD_COUNT=3 ruby main.rb
+```
+
+Would be using 2 * 3 => 6 clients.
 
 Observe the clients eat up the capacity and rate limit themsleves:
 
@@ -154,6 +165,8 @@ Another issue that we have is clients are "flappy", in the case of 40 second slo
 @sleep_for -= (ratelimit_remaining*@sleep_for)/(4500.0*rate_limit_count)
 ```
 
+> Note: This has been replaced with a time based approach. The benefit is that the value has a natural reset point and will not grow indefinetly like the rate limit count
+
 Is this perfect? Could we do better? Maybe. At the time of reading this might not even be what we're doing anymore. The idea of this section is to give you insight into how to think about how to make an affect by modifying this number (add to numerator to make it go faster, add to denominator to make it go slower). We can also do things like use polynomials, exponents, more magic numbers, etc. But in general it helps to first set a goal for desired behavior, then determine a metric that correlates to that behavior, and then figure out the best place to use it in the reduction calcualation.
 
 #### Rate Reduction Logic - remainging versus sleep value
@@ -172,9 +185,31 @@ There are other approaches but this is one. It unfortunately involves magic valu
 
 When dealing with the fast/slow client problem, the slow client might tend to keep going from 4 towards zero only to be increased back up to 4 again and again and again while the slow client is taking forever to come down from a high value.
 
-We can use the number of rate limit events to be a proxy for flappy-ness. When a test is flappy then we want it to take longer to reduce it's rate so that it gives a chance for other clients who have a higher sleep value to come down before potentially triggering their rate limiting logic.
+We can use the time since a rate limit event to be a proxy for flappy-ness. When a client is flappy then we want it to take longer to reduce it's rate so that it gives a chance for other clients who have a higher sleep value to come down before potentially triggering their rate limiting logic.
 
-The goal is that eventually all clients will be proportionally rate limited, however i'm not sure if the current logic will meet that goal.
+The goal is that eventually all clients will be proportionally rate limited, however I'm not sure if the current logic will meet that goal.
+
+Right now we're using a variant of exponential decay to generate a time factor.
+
+```ruby
+time_factor = 1.0/(1.0 - Math::E ** -(seconds_since_last_multiply/3600.0))
+```
+
+When a client was recently rate limited, this value is high:
+
+```ruby
+1.0/(1.0 - Math::E ** -(30/3600.0))
+# => 120
+```
+
+The longer the client runs without rate limiting, the lower the value will be (tending to 1):
+
+```ruby
+1.0/(1.0 - Math::E ** -(3600/3600.0))
+# => 1.5819767068693265
+```
+
+This term is used in the denominator of our rate reduction logic to slow reduction when high and to speed it up when low.
 
 Before this logic was added we would see the flappy behavior where one client might be at 5 or 10x more rate limit events than other clients. With this logic added in there is still variance, but it seems to allow them to average out.
 
@@ -231,3 +266,31 @@ Theoretically if there are 100 requests remaining in the ideal system we would e
 The idea here is that if the value is falling we don't want to decrement. If the value is rising then we want to decrement, presumably more based off of how much the count was before so a gain of 100 request would decrement more than a gain of 10 requests. How much should we decrement then? I've not really explored this and i'm sure there are major hurdles such as smoothing and magic numbers etc. Wanted to list it as an idea though incase someone thinks they have an algorithm that might fit.
 
 Initially I was thinking of this kind of like a PID controller, but i'm not sure that's the best mental model for the problem space.
+
+
+## How the F to test this?
+
+This behavior is very hard to test. Why? While the rules are fairly simple (around 100 ish lines of Ruby code for the rate limiter) they have [emergent bevhavior]() that comes from these rules. To make things harder, to really test this emergent behavior, we must `sleep()` which causes code to run for extended periods. To make hard things harder, the code involves syncronizing multiple async clients and requires a server to fully test.
+
+Ideally we would test the "behavior" of the system and not the logic but without the ability to simulate running through an entire day in a few seconds, I don't know how we could do that.
+
+I tried timecop, but it does not affect sleep:
+
+```
+require 'timecop'
+Timecop.scale(100)
+sleep(100) # would expect this to only sleep for 1 second due to timecop but sleeps for 100
+```
+
+Behavior I want to test;
+
+- One client consumes all available requests "quickly"
+- Fast/Slow client allows "slow" client to come down
+- Flappy clients are encouraged to be not flappy
+- When fast/slow clients both hit a rate limit the "fast" client is more likely to be chosen.
+- Percent/rate of rate limits received by the server is within some reasonable bounds (initial simulations of this behavior look like rate limits account for 2-3% of requests)
+
+TODO:
+
+- Rate multiply headers
+- Minimum sleep value after reduction
