@@ -41,9 +41,12 @@ class HerokuClientThrottle
     @log = log
   end
 
+  def jitter
+    sleep_for * rand(0.0..0.1)
+  end
+
   def call(&block)
-    jitter = @sleep_for * rand(0.0..0.1)
-    sleep(@sleep_for + jitter)
+    sleep(sleep_for + jitter) unless @rate_limit_count.zero?
 
     req = yield
 
@@ -87,12 +90,12 @@ class HerokuClientThrottle
         @rate_multiplier = req.headers.fetch("RateLimit-Multiplier") { @rate_multiplier }.to_f
         @min_sleep_bound = (1/(@rate_multiplier * MAX_LIMIT / 4500))
         @min_sleep_bound *= MIN_SLEEP_OVERTIME_PERCENT
+        @rate_limit_count += 1
 
         # First retry request, only increase sleep value if retry doesn't work.
         # Should guard against run-away high sleep values
         if @times_retried != 0
           @sleep_for *= 2
-          @rate_limit_count += 1
           @rate_limit_multiply_at = Time.now
         end
 
