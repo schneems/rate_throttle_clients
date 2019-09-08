@@ -41,7 +41,10 @@ end
 
 entry_count = log_files.first.each_line.count
 
-time_scale = ENV.fetch("TIME_SCALE") { 1 }.to_i
+time_scale = ENV.fetch("TIME_SCALE") {
+  puts "No time scale set assuming TIME_SCALE=1"
+  1
+}.to_i
 
 g.title = "API Client Rate Limit Throttling Sleep Values\nOver Time for #{log_files.count} PIDs"
 g.y_axis_label = "Sleep time in seconds"
@@ -49,10 +52,13 @@ g.x_axis_label = "Time duration in hours"
 
 label_hash = { 0 => '0', entry_count - 1 => ((entry_count * time_scale) / 3600.0).to_s }
 hours = (entry_count * time_scale) / 3600.0
-hour_distance = (entry_count / hours.floor.to_f).floor
-hours.floor.times.each do |hour|
-  hour += 1
-  label_hash[hour_distance * hour] = hour.to_s
+
+if hours >= 1
+  hour_distance = (entry_count / hours.floor.to_f).floor
+  hours.floor.times.each do |hour|
+    hour += 1
+    label_hash[hour_distance * hour] = hour.to_s
+  end
 end
 
 g.labels = label_hash
