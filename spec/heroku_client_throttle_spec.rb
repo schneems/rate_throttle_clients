@@ -34,16 +34,13 @@ describe 'Heroku client throttle' do
 
       @mock_time = Time.now
 
-      client.stub(:rate_limit_multiply_at)
-        .and_return(@mock_time)
+      allow(client).to receive(:rate_limit_multiply_at) { @mock_time }
       decrement_one = client.decrement_amount(FakeResponse.new, @mock_time)
 
-      client.stub(:rate_limit_multiply_at)
-        .and_return(@mock_time - 200)
+      allow(client).to receive(:rate_limit_multiply_at) { @mock_time - 200 }
       decrement_two = client.decrement_amount(FakeResponse.new, @mock_time)
 
-      client.stub(:rate_limit_multiply_at)
-        .and_return(@mock_time - 2000)
+      allow(client).to receive(:rate_limit_multiply_at) { @mock_time - 2000 }
       decrement_three = client.decrement_amount(FakeResponse.new, @mock_time)
 
       expect(decrement_one < decrement_two).to be_truthy
@@ -79,6 +76,7 @@ describe 'Heroku client throttle' do
       def client.sleep_for; 1; end
       decrement_one = client.decrement_amount(FakeResponse.new, @mock_time)
 
+      client = HerokuClientThrottle.new
       def client.sleep_for; 10; end
       decrement_two = client.decrement_amount(FakeResponse.new, @mock_time)
 
