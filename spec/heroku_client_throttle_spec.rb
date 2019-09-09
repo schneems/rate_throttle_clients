@@ -92,5 +92,17 @@ describe 'Heroku client throttle' do
         FakeResponse.new
       end
     end
+
+    it "does start rate limiting once the client detects a limit" do
+      client = HerokuClientThrottle.new
+      expect(client).to receive(:sleep).exactly(1).times
+      client.call do
+        if client.rate_limit_count < 1
+          FakeResponse.new(429)
+        else
+          FakeResponse.new
+        end
+      end
+    end
   end
 end
