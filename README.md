@@ -12,6 +12,10 @@ The goal of the client is to throttle itself without complete information (knowi
 
 The only thing that this client library has to assume is the maximum number of requests available (4,500 in this case).
 
+Here's an example of this library throttling 5 processes each with 5 threads over the course of 5 hours. The y axis represents the amount of time a client is throttled by before a request, the x axis represents time.
+
+![](https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/chart.png)
+
 ## How
 
 To accomplish throttling the client will sleep for a period of time before it makes a request. When there is lots of capacity and few clients then the sleep time should be small. When there is little capacity or many clients (imagine a world where there were 4,500 clients then they can all only make 1 request per hour) then it must sleep for a longer time to wait for requests to be refilled.
