@@ -1,4 +1,5 @@
 require_relative 'heroku_client_throttle.rb'
+require_relative 'exponential_backoff_throttle.rb'
 
 require 'excon'
 require 'pathname'
@@ -26,7 +27,7 @@ logger = ->(req, throttle) do
   status_string << "#sleep_for=#{throttle.sleep_for} "
   puts status_string
 end
-CLIENT_THROTTLE = HerokuClientThrottle.new(logger)
+CLIENT_THROTTLE = ExponentialBackoffThrottle.new(logger)
 
 if ENV["TIME_SCALE"]
   require 'timecop'

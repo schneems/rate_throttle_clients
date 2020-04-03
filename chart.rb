@@ -1,3 +1,4 @@
+#! /usr/bin/env ruby
 require 'gruff'
 require 'pathname'
 
@@ -18,6 +19,13 @@ log_dir = client_log_dir.join(log_entry)
 
 # log_dir = client_log_dir.join("2019-09-04-17-36-1567636587-254648000")
 log_dir = client_log_dir.join(ARGV[0]) if ARGV[0]
+
+time_scale = ENV.fetch("TIME_SCALE") {
+  puts "No time scale set assuming TIME_SCALE=1"
+  1
+}.to_i
+
+puts "Using log_dir #{log_dir}"
 
 raise "#{log_dir} is not a directory" unless log_dir.directory?
 
@@ -41,10 +49,6 @@ end
 
 entry_count = log_files.first.each_line.count
 
-time_scale = ENV.fetch("TIME_SCALE") {
-  puts "No time scale set assuming TIME_SCALE=1"
-  1
-}.to_i
 
 g.title = "API Client Rate Limit Throttling Sleep Values\nOver Time for #{log_files.count} PIDs"
 g.y_axis_label = "Sleep time in seconds"

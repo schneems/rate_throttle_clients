@@ -66,6 +66,22 @@ Observe the clients eat up the capacity and rate limit themsleves:
 
 You can adjust the number of threads and processes via env vars.
 
+## Chart
+
+
+Once you've run for awhile you can chart the output:
+
+```
+$ ruby chart.rb
+```
+
+By default it will assume your data is not time scaled, it will chart based off of data in the last log file. If you want to chart another log directory, then pass it in as the first argument.
+
+> Note: This only works with data from HerokuRateThrottle data at the moment
+
+Ruby 2.6.4
+
+
 ## Notes
 
 ### Jitter
