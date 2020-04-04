@@ -16,14 +16,19 @@ logger = ->(req, throttle) do
   #   File.open(LOG_FILE, 'a') { |f| f.puts("#{throttle.sleep_for.to_s}") }
   # end
 
-  seconds_since_last_multiply = Time.now - throttle.rate_limit_multiply_at
   remaining = req.headers["RateLimit-Remaining"].to_i
   status_string = String.new("")
   status_string << "#{Process.pid}##{Thread.current.object_id}: "
   status_string << "#status=#{req.status} "
   status_string << "#remaining=#{remaining} "
   status_string << "#rate_limit_count=#{throttle.rate_limit_count} "
-  status_string << "#seconds_since_last_multiply=#{seconds_since_last_multiply.ceil} "
+
+
+  if throttle.rate_limit_multiply_at
+    seconds_since_last_multiply = Time.now - throttle.rate_limit_multiply_at
+    status_string << "#seconds_since_last_multiply=#{seconds_since_last_multiply.ceil} "
+  end
+
   status_string << "#sleep_for=#{throttle.sleep_for} "
   puts status_string
 end
@@ -61,9 +66,7 @@ PROCESS_COUNT.times.each do
     LOG_FILE = LOG_DIR.join(Process.pid.to_s).to_s
     Thread.new do
       loop do
-        File.open(LOG_FILE, 'a') do |f|
-          f.puts("#{CLIENT_THROTTLE.sleep_for.to_s}")
-        end
+        CLIENT_THROTTLE.write_sleep_to_disk(LOG_FILE)
         sleep 1
       end
     end
