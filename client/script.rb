@@ -12,10 +12,6 @@ THREAD_COUNT = ENV.fetch("THREAD_COUNT") { 5 }.to_i
 PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
 
 logger = ->(req, throttle) do
-  # throttle.mutex.synchronize do
-  #   File.open(LOG_FILE, 'a') { |f| f.puts("#{throttle.sleep_for.to_s}") }
-  # end
-
   remaining = req.headers["RateLimit-Remaining"].to_i
   status_string = String.new("")
   status_string << "#{Process.pid}##{Thread.current.object_id}: "
