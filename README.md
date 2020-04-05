@@ -1,10 +1,26 @@
 # Rate Limit GCRA Client Demo
 
-## What
+## What is Rate Limiting (server side)?
 
 The Heroku rate limit algorithm follows [Generic Cell Rate Algorithm](https://brandur.org/rate-limiting). Basically, the idea is that you start with a bucket of requests, 4,500. When you make an API request, then the number goes down. The bucket is also refilled at a rate of 4,500 an hour. Rather than waiting for the end of the hour and adding 4,500 to your limit, the algorithm continuously updates the value throughout the hour. This encourages clients to spread out their requests rather than wait for a fixed time period and then assault the API server.
 
-One downside here is that if you're writing a client, to effectively add rate limiting code, you need to have complete information about your system i.e. how many API clients do you own that are using the same API token. In a distributed system this is a non-trivial problem, any attempts to hard code a number would be invalidated as soon as extra capacity is added to your infrastructure, such as adding more dynos to a background worker process.
+## What is rate throttling (client side)?
+
+While the server will reject requests if they are over the limit, the client can use this information to behave differently. For example they could "smooth out" their requests over time. When they detect a client is rate limited, they can retry the request after sleeping for some time. Without rate throttling these requests would fail and everyone (the client and server) would have a bad time.
+
+## What MUST an effective rate throttle algorithm do?
+
+- Works on distributed systems: It is very easy to rate throttle one client on one machine. When it hits a rate throttle event, it sleeps for the specified amount of time for another request to be available and retries. It's slightly more difficult with multiple clients in the same process. When the problem spans multiple processes on multiple machines, it becomes a distributed coordination problem. The algorithm needs to function without requiring expensive or complicated coordination. The only information it has about the overall system comes from headers served from the server or from it's own prior experience.
+
+## What makes a good rate throttle algorithm?
+
+- Equitable distribution of requests across the system: If there are two clients and one client is throttling by sleeping for 100 seconds and the other is throttling for 1 second, the distribution of requests are not equitable. Ideally over time each client might go up or down, but both would see a median of 50 seconds of sleep time. Why? If processes in a system have a high variance, one process is starved for API resources. It then becomes difficult to balance or optimize otherworkloads. When a client is stuck waiting on the API, ideally it can perform other operations (for example in other threads). If one process is using 100% of CPU and slamming the API and other is using 1% of CPU and barely touching the API, it is difficult to balance the workloads.
+- Minimize retry ratio: For example if every 50 successful requests, the client hits a rate limited request the ratio of retries is 1/50 or 2%. Why minimize this value? It takes CPU and Network resources to make requests that fail, if the client is making requests that are being limited, it's using resources that could be better spent somewhere else. The server also benefits as it spends less time dealing with rate limiting.
+- Minimize sleep/wait time: Retry ratio can be improved artificially by choosing high sleep times. In the real world consumers don't want to wait longer than absolutely necessarry. While a client might be able to "work steal" while it is sleeping/waiting, there's not guarantee that's the case. Essentially assume that any amount of time spent sleeping over the minimum amount of time required is wasted. This value is calculateable, but that calculation requires complete information of the distributed system.
+  - At high workload it should be able to consume all available requests: If a server allows 100,000 requests in a day then a client should be capable of making 100,000 requests. If the rate limiting algorithm only allows it to make 100 requests it would have low retry ratio but high wait time.
+  - Handle a change in work load to either slow down or speed up rate throttling: If the workload is light, then clients should not wait/sleep much. If workload is heavy, then clients should sleep/wait enough. The algorithm should adjust to a changing workload as quickly as possible.
+
+## What is this repo?
 
 That's where this demo comes in. It includes a server that implements a crude version of GCRA and a client that can be configured to run multiple processes and threads.
 
