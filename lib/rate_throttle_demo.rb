@@ -32,7 +32,7 @@ class RateThrottleDemo
     @log_dir.entries.map do |entry|
       @log_dir.join(entry)
     end.select do |file|
-      file.file?
+      file.file? && file.extname == ".json"
     end.map do |file|
       JSON.parse(file.read)
     end.each do |json|
@@ -127,7 +127,7 @@ class RateThrottleDemo
       request_count: request_count
     }
 
-    File.open(@log_dir.join("#{Process.pid}:#{Thread.current.object_id}"), 'a') do |f|
+    File.open(@log_dir.join("#{Process.pid}:#{Thread.current.object_id}.json"), 'a') do |f|
       f.puts(results.to_json)
     end
   end

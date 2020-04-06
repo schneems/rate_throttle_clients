@@ -32,8 +32,6 @@ app = -> (env) do
       @limit_left = [@limit_left + time_diff * @rate_of_limit_gain, MAX_REQUESTS].min
     end
 
-    puts @limit_left
-
     if @limit_left >= 1
       @limit_left -= 1
       successful_request = true
