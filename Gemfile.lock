@@ -2,6 +2,7 @@ GEM
   remote: https://rubygems.org/
   specs:
     diff-lcs (1.3)
+    excon (0.73.0)
     gruff (0.7.0)
       rmagick (~> 2.13, >= 2.13.4)
     nio4r (2.5.1)
@@ -30,6 +31,7 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  excon
   gruff
   puma
   rack
