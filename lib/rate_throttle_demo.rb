@@ -64,24 +64,25 @@ class RateThrottleDemo
   end
 
   private def run_client_single
-    start_time = Time.now
-    end_time = start_time + @duration
+    end_at_time = Time.now + @duration
     request_count = 0
     retry_count = 0
     request_time = 0
 
-    unless @client.instance_variable_get(:"@time_scale")
+    if !@client.instance_variable_get(:"@time_scale")
       def @client.sleep(val)
+        @max_sleep_val = val if val > @max_sleep_val
         super val/@time_scale
       end
     end
 
     @client.instance_variable_set(:"@time_scale", @time_scale)
+    @client.instance_variable_set(:"@max_sleep_val", 0)
 
     Timecop.scale(@time_scale) do
       loop do
         begin_time = Time.now
-        break if begin_time > end_time
+        break if begin_time > end_at_time
 
         @client.call do
           request_count += 1
@@ -105,7 +106,7 @@ class RateThrottleDemo
     retry_ratio = retry_count / request_count.to_f
 
     results = {
-      request_time: request_time,
+      max_sleep_val: @client.instance_variable_get(:"@max_sleep_val"),
       retry_ratio: retry_ratio,
       request_count: request_count
     }
