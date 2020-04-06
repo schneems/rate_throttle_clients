@@ -6,3 +6,10 @@ begin
   task default: [:spec]
 rescue LoadError
 end
+
+
+
+task "bench" do
+
+
+end
