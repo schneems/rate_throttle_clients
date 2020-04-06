@@ -26,8 +26,8 @@ require_relative '../lib/rate_throttle_demo.rb'
 puts "=== Starting ==="
 
 client = ExponentialBackoffThrottle.new
-throttle = RateThrottleDemo.new(client)
-throttle.call
+demo = RateThrottleDemo.new(client, stream_requests: true)
+demo.call
 
 puts "===== Done ====="
-puts throttle.results
+puts demo.results
