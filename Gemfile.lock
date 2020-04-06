@@ -26,6 +26,7 @@ GEM
     rspec-support (3.8.2)
     rubyvis (0.7.0)
     timecop (0.9.1)
+    wait_for_it (0.2.1)
 
 PLATFORMS
   ruby
@@ -39,6 +40,7 @@ DEPENDENCIES
   rspec
   rubyvis
   timecop
+  wait_for_it
 
 BUNDLED WITH
    2.0.2

@@ -1,20 +1,18 @@
-this_dir = File.expand_path("..", __FILE__)
+require_relative 'client/heroku_client_throttle.rb'
+require_relative 'client/exponential_backoff_throttle.rb'
+require_relative 'lib/rate_throttle_demo.rb'
 
-server_file = File.join(this_dir, "server/config.ru")
-client_file = File.join(this_dir, "client/script.rb")
-
+require 'wait_for_it'
 
 begin
-  pid = Process.spawn("puma #{server_file}")
+  HOUR = 3600
 
-  sleep 4
+  puts "=== Starting ==="
+  client = ExponentialBackoffThrottle.new
+  demo = RateThrottleDemo.new(client: client, stream_requests: true, duration: 6 * HOUR)
+  demo.call
 
-  system("ruby #{client_file}")
+  puts "===== Done ====="
 ensure
-
-  if pid
-    Process.kill("TERM", pid)
-    Process.wait(pid)
-  end
+  puts demo.results
 end
-

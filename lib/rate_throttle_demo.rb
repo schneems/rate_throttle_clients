@@ -10,11 +10,12 @@ Thread.abort_on_exception = true
 class RateThrottleDemo
   THREAD_COUNT = ENV.fetch("THREAD_COUNT") { 5 }.to_i
   PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
-  RUN_TIME=ENV.fetch("RUN_TIME") { 90 }.to_i # Seconds
-  LOG_DIR = Pathname.new(__FILE__).join("../../logs/clients/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
+  RUN_TIME=ENV.fetch("RUN_TIME") { 10 }.to_i # Seconds
+  LOG_DIR = Pathname.new(__dir__).join("../logs/clients/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
   TIME_SCALE = ENV.fetch("TIME_SCALE", 1).to_f
+  RACKUP_FILE = Pathname.new(__dir__).join("../server/config.ru")
 
-  def initialize(client, thread_count: THREAD_COUNT, process_count: PROCESS_COUNT, duration: RUN_TIME, log_dir: LOG_DIR, time_scale: TIME_SCALE, stream_requests: false)
+  def initialize(client:,thread_count: THREAD_COUNT, process_count: PROCESS_COUNT, duration: RUN_TIME, log_dir: LOG_DIR, time_scale: TIME_SCALE, stream_requests: false, json_duration: 30, rackup_file: RACKUP_FILE)
     @client = client
     @thread_count = thread_count
     @process_count = process_count
@@ -22,6 +23,8 @@ class RateThrottleDemo
     @log_dir = log_dir
     @time_scale = time_scale
     @stream_requests = stream_requests
+    @json_duration = json_duration
+    @rackup_file = rackup_file
     @threads = []
     @pids = []
 
@@ -48,13 +51,15 @@ class RateThrottleDemo
   end
 
   def call
-    @process_count.times.each do
-      @pids << fork do
-        run_threads
+    WaitForIt.new("bundle exec puma #{@rackup_file.to_s}", env: {"TIME_SCALE" => @time_scale.to_i.to_s}, wait_for: "Use Ctrl-C to stop") do |spawn|
+      @process_count.times.each do
+        @pids << fork do
+          run_threads
+        end
       end
-    end
 
-    @pids.map { |pid| Process.wait(pid) }
+      @pids.map { |pid| Process.wait(pid) }
+    end
   end
 
   private def run_threads
@@ -83,6 +88,7 @@ class RateThrottleDemo
 
   private def run_client_single
     end_at_time = Time.now + @duration
+    next_json_time = Time.now + @json_duration
     request_count = 0
     retry_count = 0
 
@@ -110,6 +116,10 @@ class RateThrottleDemo
       loop do
         begin_time = Time.now
         break if begin_time > end_at_time
+        if begin_time > next_json_time
+          write_json_value(retry_count: retry_count, request_count: request_count, max_sleep_val: @client.max_sleep_val)
+          next_json_time = begin_time + @json_duration
+        end
 
         @client.call do
           request_count += 1
@@ -123,7 +133,6 @@ class RateThrottleDemo
           else
             raise "Got unexpected reponse #{request.status}. #{request.inspect}"
           end
-
 
           if @stream_requests
             status_string = String.new
@@ -142,15 +151,17 @@ class RateThrottleDemo
       end
     end
 
-    retry_ratio = retry_count / request_count.to_f
+    write_json_value(retry_count: retry_count, request_count: request_count, max_sleep_val: @client.max_sleep_val)
+  end
 
+  private def write_json_value(retry_count:, request_count:, max_sleep_val:)
     results = {
-      max_sleep_val: @client.max_sleep_val,
-      retry_ratio: retry_ratio,
+      max_sleep_val: max_sleep_val,
+      retry_ratio: retry_count / request_count.to_f,
       request_count: request_count
     }
 
-    File.open(@log_dir.join("#{Process.pid}:#{Thread.current.object_id}.json"), 'a') do |f|
+    File.open(@log_dir.join("#{Process.pid}:#{Thread.current.object_id}.json"), 'w+') do |f|
       f.puts(results.to_json)
     end
   end
