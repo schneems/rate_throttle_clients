@@ -5,10 +5,12 @@ require 'date'
 require 'json'
 require 'timecop'
 
+Thread.abort_on_exception = true
+
 class RateThrottleDemo
   THREAD_COUNT = ENV.fetch("THREAD_COUNT") { 5 }.to_i
   PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
-  RUN_TIME=ENV.fetch("RUN_TIME") { 10 }.to_i # Seconds
+  RUN_TIME=ENV.fetch("RUN_TIME") { 90 }.to_i # Seconds
   LOG_DIR = Pathname.new(__FILE__).join("../../logs/clients/#{Time.now.strftime('%Y-%m-%d-%H-%M-%s-%N')}")
   TIME_SCALE = ENV.fetch("TIME_SCALE", 1).to_f
 
@@ -61,6 +63,21 @@ class RateThrottleDemo
         run_client_single
       end
     end
+
+    # Chart support, print out the sleep value in 1 second increments
+    Thread.new do
+      loop do
+        @threads.each do |thread|
+          sleep_for = thread.thread_variable_get("last_sleep_value") || 0
+
+          File.open(@log_dir.join("#{Process.pid}:#{thread.object_id}-chart-data.txt"), 'a') do |f|
+            f.puts(sleep_for)
+          end
+        end
+        sleep 1 # time gets adjusted via TIME_SCALE later in time.rb
+      end
+    end
+
     @threads.map(&:join)
   end
 
@@ -72,11 +89,17 @@ class RateThrottleDemo
     if !@client.instance_variable_get(:"@time_scale")
       def @client.sleep(val)
         @max_sleep_val = val if val > @max_sleep_val
+        Thread.current.thread_variable_set("last_sleep_value", val)
+
         super val/@time_scale
       end
 
       def @client.max_sleep_val
         @max_sleep_val
+      end
+
+      def @client.last_sleep
+        @last_sleep || 0
       end
     end
 

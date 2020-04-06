@@ -4,10 +4,9 @@ RATE_LIMIT_COUNT_KEY = :"_exponential_backoff_throttle_rate_limit_count"
 
 # Class used for reporting
 class RateThrottleInfo
-  attr_reader :rate_limit_multiply_at, :rate_limit_count, :sleep_for
+  attr_reader :sleep_for
 
-  def initialize(rate_limit_count: Thread.current[RATE_LIMIT_COUNT_KEY], sleep_for: )
-    @rate_limit_count = rate_limit_count
+  def initialize(sleep_for: )
     @sleep_for = sleep_for
   end
 end
@@ -31,45 +30,25 @@ class ExponentialBackoffThrottle
     @minimum_sleep = MIN_SLEEP
     @multiplier = 2
     @log = log
-    @thread_sleeps_hash = {}
   end
 
   def call(&block)
-    # Needed to log out to build consistent chart
-    @thread_sleeps_hash[Thread.current] = 0
-
     sleep_for = @minimum_sleep
 
     while (req = yield) && req.status == 429
-      Thread.current[RATE_LIMIT_COUNT_KEY] ||= 0
-      Thread.current[RATE_LIMIT_COUNT_KEY] += 1
-
-      @thread_sleeps_hash[Thread.current] = sleep_for
-
-      # Log failed requests
       log.call(req, RateThrottleInfo.new(sleep_for: sleep_for))
 
       sleep(sleep_for + jitter(sleep_for))
       sleep_for *= multiplier
     end
 
-    # Log success requests
-    log.call(req, RateThrottleInfo.new(sleep_for: 0))
+    sleep(0) # reset value for chart
 
     req
   end
 
   def jitter(sleep_for)
     sleep_for * rand(0.0..0.1)
-  end
-
-  # Used to generate charts
-  def write_sleep_to_disk(log_dir)
-    @thread_sleeps_hash.each do |thread, sleep_for|
-      File.open("#{LOG_FILE}##{thread.object_id}", 'a') do |f|
-        f.puts("#{sleep_for}")
-      end
-    end
   end
 end
 
