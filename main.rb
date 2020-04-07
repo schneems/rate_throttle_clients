@@ -2,7 +2,6 @@ require_relative 'client/heroku_client_throttle.rb'
 require_relative 'client/exponential_backoff_throttle.rb'
 require_relative 'lib/rate_throttle_demo.rb'
 
-require 'wait_for_it'
 
 begin
   HOUR = 3600

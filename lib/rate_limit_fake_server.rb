@@ -1,13 +1,9 @@
 require 'thread'
-# require 'socket'
 
-# module UniquePort
-#   def self.call
-#     TCPServer.open('127.0.0.1', 0) do |server|
-#       server.connect_address.ip_port
-#     end
-#   end
-# end
+if ENV["TIME_SCALE"]
+  require 'timecop'
+  Timecop.scale(ENV["TIME_SCALE"].to_f)
+end
 
 class RateLimitFakeServer
   MAX_REQUESTS = 4500
@@ -36,9 +32,9 @@ class RateLimitFakeServer
         @limit_left -= 1
         successful_request = true
       end
-
-      headers = { "RateLimit-Remaining" => [@limit_left.floor, 0].max, "RateLimit-Multiplier" => 1, "Content-Type" => "text/plain".freeze }
     end
+
+    headers = { "RateLimit-Remaining" => [@limit_left.floor, 0].max, "RateLimit-Multiplier" => 1, "Content-Type" => "text/plain".freeze }
 
     if !successful_request
       status = 429
