@@ -36,11 +36,78 @@ In addition to these cumulative metrics, the amount of time a given client is sl
 
 Here's an example of this library throttling 5 processes each with 5 threads over the course of 5 hours. The y axis represents the amount of time a client is throttled by before a request, the x axis represents time.
 
-![](https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/chart.png)
+![](https://www.dropbox.com/s/ppptbgk215ihdzy/Screenshot%202020-04-07%2021.22.41.png?raw=1)
+
+## How to use this repo
+
+There are [several rate throttling clients](https://github.com/schneems/rate-limit-gcra-client-demo/tree/master/client), a [fake server](https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/lib/rate_limit_fake_server.rb) and a [class to drive a smulation](https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/lib/rate_throttle_demo.rb).
+
+There are two different ways to drive a simulation. There is a [main.rb](https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/main.rb) that can be edited to specify a specific client and run a simulation:
+
+```
+$ TIME_SCALE=10 ruby main.rb
+60930#70203979671860: status=429 remaining=0 retry_count=1 request_count=1 max_sleep_val=0.00
+60930#70203979670460: status=429 remaining=0 retry_count=1 request_count=1 max_sleep_val=0.82
+60929#70203979671120: status=429 remaining=0 retry_count=1 request_count=1 max_sleep_val=0.00
+60930#70203979670780: status=429 remaining=0 retry_count=1 request_count=1 max_sleep_val=0.85
+# ...
+```
+
+This will drive the client for a period of time specified in `main.rb` and stream logs. It also periodically writes values to disk so that if you cancel the run via `CTRL+C` it will output the results:
+
+```
+# ...
+60930#70203979670780: status=429 remaining=0 retry_count=1 request_count=1 max_sleep_val=0.85
+
+CTRL+C
+## Raw ExponentialIncreaseSleepAndRemainingDecrease results
+
+max_sleep_val: [854.89, 837.72, 854.89, 854.89, 837.72, 837.72, 854.89, 837.72, 854.89, 837.72]
+retry_ratio: [0.62, 0.62, 0.62, 0.64, 0.61, 0.68, 0.62, 0.62, 0.67, 0.60]
+request_count: [700.00, 866.00, 614.00, 120.00, 520.00, 101.00, 1242.00, 684.00, 93.00, 935.00]
+
+Traceback (most recent call last):
+  7: from main.rb:19:in `<main>'
+  6: from /Users/rschneeman/Documents/projects/ratelimit-demo/lib/rate_throttle_demo.rb:78:in `call'
+  5: from /Users/rschneeman/Documents/projects/ratelimit-demo/lib/rate_throttle_demo.rb:78:in `new'
+  4: from /Users/rschneeman/.gem/ruby/2.6.4/gems/wait_for_it-0.2.1/lib/wait_for_it.rb:96:in `initialize'
+  3: from /Users/rschneeman/Documents/projects/ratelimit-demo/lib/rate_throttle_demo.rb:85:in `block in call'
+  2: from /Users/rschneeman/Documents/projects/ratelimit-demo/lib/rate_throttle_demo.rb:85:in `map'
+  1: from /Users/rschneeman/Documents/projects/ratelimit-demo/lib/rate_throttle_demo.rb:85:in `block (2 levels) in call'
+/Users/rschneeman/Documents/projects/ratelimit-demo/lib/rate_throttle_demo.rb:85:in `wait': Interrupt
+```
+
+Once you've run a simulation you can plot the latest values using `chart.rb`
+
+```
+$ TIME_SCALE=10 ruby chart.rb
+```
+
+<!-- Ruby 2.6.4 -->
+
+To plot a different run, specify the directory manually:
+
+```
+$ TIME_SCALE=10 ruby chart.rb specific/directory/here/
+```
+
+In addition to driving things manually there are several rake tasks:
+
+```
+$ rake bench:workload
+```
+
+This task simulates a client that starts with a prior sleep value but the server has a lot of remaining requests, it then outputs how long it takes for the client to consume all the remaining requests. This is a metric for the "Handle a change in work load" criteria.
+
+```
+$ rake bench
+```
+
+This task runs multiple clients quietly for 30 (simulated) minutes and then outputs their results. You can edit the Rakefile manually to specify the clients you want.
 
 ## How to write a Rate throttling algorithm
 
-One method of writing a retry algorithm is to write the simplest thing that could work, then observe what could be better about it and iterate until better values are achieved.
+One method of writing a retry algorithm is to write the simplest thing that could work, then observe what could be better about it and iterate until better values are achieved. What follows are a list of clients, some are theoretical and some are implemented in the [clients directory](https://github.com/schneems/rate-limit-gcra-client-demo/tree/master/client).
 
 ### Retry Only
 
@@ -140,7 +207,7 @@ To decrease retry ratio, we'll have to slow down request rate. One way to do thi
 
 Use the same exponential backoff algorithm as before, but now after we make a successful request instead of not sleeping at all, we preserve the sleep value and before the next request. If it's successful then we decrease the amount we have to sleep on every successful request.
 
-This is implemented in: ()
+This is implemented in: (https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/client/exponential_increase_gradual_decrease.rb)
 
 Like before, when the client is rate limitied it has an exponential increase, but now, after a successful request it will continue to sleep the same amount, but slightly less. Since before tuning the exponential multiplier affected the system a large amount, the amount decreased will have a large impact:
 
@@ -170,7 +237,7 @@ Where `some_value` is tunable.
 
 ### Exponential increase proportional decrease
 
-When a rate limit is triggered, exponentially increase, when successful request reduce sleep value by an amount proportional to sleep value.
+When a rate limit is triggered, exponentially increase, when successful request reduce sleep value by an amount proportional to sleep value. Implemented in https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/client/exponential_increase_proportional_decrease.rb
 
 For a 30 minute run (multiplier=1.2 decrease_divisor=4500)
 
@@ -229,7 +296,7 @@ This is roughly 5 minutes. 7 hours is not acceptable for the proportional client
 
 ### Exponential increase proportional decrease based on sleep value and remaining requests
 
-Same exponential increase behavior, now we add the rate_limit_remainging value to our decrease:
+Same exponential increase behavior, now we add the rate_limit_remainging value to our decrease (implemented in https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/client/exponential_increase_sleep_and_remaining_decrease.rb):
 
 ```
 decrease_value = (sleep_time * rate_limit_remaining) / some_value
@@ -346,5 +413,7 @@ What this ends up meaning is that the `@shared_sleep_value` has a very small tim
 Race conditions are bad, unpredictability is bad. Why is this a "happy" accident? In general we want some controlled randomness. We also want to not leave really high values high for too long, and this process is more likely to accidentally reduce a value than to increase it. Why? Values that are low indicate threads that are firing rapidly, the more often a thread fires, the more often it will set this value. So while we do see random jump ups, the jump down is more likely.
 
 We could fix this by storing this data as a thread local. But I like this behavior. In general we don't want a process or a thread "stuck" in one position for too long and this race condition behavior seems to reduce variance.
+
+It's worth noting that this behavior only happens if you're running clients in threads. If you're only executing one client per process (which is likely the case for most people) there will be no race condition. If you instantiate one client per thread, there will be no race condition.
 
 
