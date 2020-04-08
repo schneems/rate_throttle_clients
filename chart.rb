@@ -48,11 +48,11 @@ end
 
 entry_count = log_files.first.each_line.count
 
-g.title = "API Client Rate Limit Throttling Sleep Values\nOver Time for #{log_files.count} PIDs"
+g.title = "API Client Rate Limit Throttling Sleep Values\nOver Time for #{log_files.count} clients"
 g.y_axis_label = "Sleep time in seconds"
 g.x_axis_label = "Time duration in hours"
 
-label_hash = { 0 => '0', entry_count - 1 => ((entry_count * time_scale) / 3600.0).to_s }
+label_hash = { 0 => '0', entry_count - 1 => "%.2f" % ((entry_count * time_scale) / 3600.0)}
 hours = (entry_count * time_scale) / 3600.0
 
 if hours >= 1

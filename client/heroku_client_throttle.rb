@@ -29,9 +29,9 @@ class HerokuClientThrottle
 
   attr_reader :rate_limit_multiply_at, :sleep_for, :rate_limit_count, :log, :mutex
 
-  def initialize(log = ->(req, throttle) {})
+  def initialize(log = ->(req, throttle) {}, sleep_for: 2 * MIN_SLEEP)
     @mutex = Mutex.new
-    @sleep_for = 2 * MIN_SLEEP
+    @sleep_for = sleep_for
     @rate_limit_count = 0
     @times_retried = 0
     @retry_thread = nil

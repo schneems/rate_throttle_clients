@@ -20,312 +20,331 @@ While the server will reject requests if they are over the limit, the client can
   - At high workload it should be able to consume all available requests: If a server allows 100,000 requests in a day then a client should be capable of making 100,000 requests. If the rate limiting algorithm only allows it to make 100 requests it would have low retry ratio but high wait time.
   - Handle a change in work load to either slow down or speed up rate throttling: If the workload is light, then clients should not wait/sleep much. If workload is heavy, then clients should sleep/wait enough. The algorithm should adjust to a changing workload as quickly as possible.
 
-## What is this repo?
+ ## What is this repo?
 
-That's where this demo comes in. It includes a server that implements a crude version of GCRA and a client that can be configured to run multiple processes and threads.
+The purpose of this repo is to explore how better rate throttling algorighms can be written and to demonstrate and "prove" the "quality" of what can be considered a "good" rate throttling algorithm.
 
-The goal of the client is to throttle itself without complete information (knowing the total number of clients).
+This repo includes a "fake" server that implements a rudimentary version of GCRA rate limiting. It also features several rate throttling algorithms that can be used to make requests against that server. Simulations can be run with this repo. Since there is a lot of waiting involved, (sleeping and rate limiting) time can be "scaled" to go faster. By setting the `TIME_SCALE` env var. A value of 10 will make an hour long simulation take 6 minutes. Exceeding a value of 10 isn't recommended.
 
-The only thing that this client library has to assume is the maximum number of requests available (4,500 in this case).
+While running, several critical values are logged for the purposes of comparing rate throttling algorithm fitness.
+
+- retry_ratio: Represents the percentage (a number from 0 to 1) of requests that needed to be retried. Should be minimized (Minimize retry ratio).
+- max_sleep_val: Represents the maximum value that a given client had to sleep. Should be minimized (minimize sleep/wait time).
+- request_count: Represents the total number of requests (success + retry) that a given client should make. Variance of request count between clients should be minimized (equitable distribution).
+
+In addition to these cumulative metrics, the amount of time a given client is sleeping for is sampled in order to produce graphs of the clients as they're running over time.
 
 Here's an example of this library throttling 5 processes each with 5 threads over the course of 5 hours. The y axis represents the amount of time a client is throttled by before a request, the x axis represents time.
 
 ![](https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/chart.png)
 
-## How
+## How to write a Rate throttling algorithm
 
-To accomplish throttling the client will sleep for a period of time before it makes a request. When there is lots of capacity and few clients then the sleep time should be small. When there is little capacity or many clients (imagine a world where there were 4,500 clients then they can all only make 1 request per hour) then it must sleep for a longer time to wait for requests to be refilled.
+One method of writing a retry algorithm is to write the simplest thing that could work, then observe what could be better about it and iterate until better values are achieved.
 
-Originally I tried to "guess" at the amount of clients that were in the system, however I realized this translated directly to a sleep value and would rather not have to bake in assumptions.
+### Retry Only
 
-- When a request hits a rate limit then double the amount of time it sleeps before making the next request
-- When a request is successful subtract from the sleep value.
+A primitive rate throttling algorithm is nothing more than a retry algorithm. When a request comes back as rate limited (429 response) then it can be retried.
 
-Instead of a linear reduction, I chose to have the rate of reduction decrease as the number of remaining requests reported by the API is reduced, so if there are 4500 remaining there will be a large reduction, and if there is 1 remaining there will be a tiny reduction. Instead of a sawtooth pattern, this should produce a logarithmic decrease.
+- Pros: Super simple
+- Cons: Extremely high retry ratio. Is essential a DDoS to the server and cause your account to get suspended.
 
-## Run
+### Retry with backoff
 
-You can boot both the client and the server by executing the main `main.rb`, this will boot the `server/config.ru` with puma and then run the client `client/script.rb`.
+A step up from "retry only" is to make requests, then when a 429 is hit, sleep before the next request is made.
 
-```
-$ ruby main.rb
-```
+- Pros: Still very simple
+- Cons: Difficult to find the "right" value to sleep. This violates several requirements of what a rate throttling algorithm must be able to do.
 
-You can speed up the simulation by running with
+### Retry with exponential backoff
 
-```
-$ TIME_SCALE=10 ruby main.rb
-```
+Instead of hard-coding a sleep value, clients can instead sleep for progressively higher values, some multiplier of the value that was previously tried. A common value is 2x the prior sleep request, and a good place to start sleeping is the minimum amount of time to sleep for 1 request to become available via the server. As soon as a successful request is made, stop sleeping until the next 429 is hit
 
-> Note: The more you scale time the more inacurate the simulation will be.
-
-You can also tune the number of clients by setting threads and processes. Total client count will be threads * processes, for example:
+This algorithm is implemented in https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/client/exponential_backoff_throttle.rb so we actually have numbers. This is from a 30 minute run (multiplier=2):
 
 ```
-PROCESS_COUNT=2 THREAD_COUNT=3 ruby main.rb
+max_sleep_val: [854.89, 837.72, 854.89, 854.89, 837.72, 837.72, 854.89, 837.72, 854.89, 837.72]
+retry_ratio: [0.62, 0.62, 0.62, 0.64, 0.61, 0.68, 0.62, 0.62, 0.67, 0.60]
+request_count: [700.00, 866.00, 614.00, 120.00, 520.00, 101.00, 1242.00, 684.00, 93.00, 935.00]
 ```
 
-Would be using 2 * 3 => 6 clients.
+This means that the maximum time spent sleeping over a 30 minute period was around 854 seconds (14 minutes), the retry ratio was around 60% (so only about 40% of requests were successful. And the distribution of request counts is not very even with the lowest at 93 requests and the highest at 935, the standard deviation is 387.
 
-Observe the clients eat up the capacity and rate limit themsleves:
+Here is a chart of this algorithm running:
 
-```
-13946#70249664000540: #status=200 #client_guess=7.570666666672482 #remaining=74 #sleep_for=6.1632330591539715
-13946#70249664000400: #status=200 #client_guess=7.554222222228037 #remaining=73 #sleep_for=6.097463071915681
-13946#70249664000260: #status=200 #client_guess=7.538000000005815 #remaining=72 #sleep_for=6.62650640512892
-13946#70249664000680: #status=200 #client_guess=7.522000000005815 #remaining=78 #sleep_for=6.627982984389338
-13946#70249664000840: #status=200 #client_guess=7.504666666672482 #remaining=78 #sleep_for=6.312446465633488
-13946#70249664000540: #status=200 #client_guess=7.487333333339149 #remaining=77 #sleep_for=6.465234230526173
-13946#70249664000260: #status=200 #client_guess=7.4702222222280374 #remaining=76 #sleep_for=6.227334414609264
-13946#70249664000400: #status=200 #client_guess=7.453333333339149 #remaining=75 #sleep_for=6.61480005482600
-```
+![chart](https://user-images.githubusercontent.com/59744/78417124-ae99b380-75f4-11ea-9b13-d13508ce6379.png)
 
-You can adjust the number of threads and processes via env vars.
+- Pros:
+  - Relatively simple,
+  - Does not DDoS the server
+  - Does not violate rate throttle requirements
+  - A valid rudimentary solution
+- Cons:
+  - A very high sleep value
+  - A very high retry ratio
+  - A high request variance
 
-## Chart
-
-
-Once you've run for awhile you can chart the output:
+Over time it actually gets worse, here's an example of a 120 minute run (multiplier=2):
 
 ```
-$ ruby chart.rb
+max_sleep_val: [3370.67, 1800.49, 3370.67, 1800.49, 1800.49, 3370.67, 3370.67, 1800.49, 1800.49, 3370.67]
+retry_ratio: [0.60, 0.61, 0.60, 0.60, 0.62, 0.59, 0.60, 0.60, 0.60, 0.66]
+request_count: [1176.00, 2318.00, 1581.00, 3472.00, 1975.00, 2276.00, 3611.00, 1988.00, 3659.00, 602.00]
 ```
 
-By default it will assume your data is not time scaled, use the `TIME_SCALE` env var with this command if your data is scaled. This utility will chart based off of data in the last log file. If you want to chart another log directory, then pass it in as the first argument.
+The maximum time spent sleeping is nearly an hour (3600 seconds) which is a LONG time to sleep. The stdev is now 1043, which is 3 times higher. To write a better algorithm, let's explore why this behavior exists.
 
-Ruby 2.6.4
+If you look at the graph you see that some clients sleep time keeps going up and up, while other client's sleep time hover at a low value for a long duration. Why is that? Since there is no sleeping time when requests are comming back as a success the server is getting hammered. This algorithm does reduce the number of failed requests, but not by a whole lot (retry ratio is still 60%). So when a request is made, there's a 60% chance that it will be rate limited. This is true over the distributed system. For clients that have a small value, they have a 60% chance of doubling a small value, while clients sleeping for a large value have a 60% chance of doubling that large value. To minimize this chance of "runaway" high sleep time behavior, the system needs to reduce the retry ratio (reduces chances of retrying a large sleep value) and make the request count more equitable (if all clients are retrying the same amount, there's less chance that one of them will be an outlier with a high sleep value).
 
-## Notes
+We can adjust the multiplier for the exponential backoff from 2 to another value such as 1.2 or 3. When we do that what happens to the values?
 
-### Jitter
+We will guess about the results and then try them experimentally. First let's try a multiplier of 1.2. What do we predict will happen?
 
-Adding jitter seems to be hugely helpful to spreading out requests, without it then all of the sawtooth patterns overlap and it increases the number of concurrent requests that the server must handle.
+- Lowering the multiplier (to 1.2) Guess:
+  - Retry ratio is increased since it takes more retries to get to a large value
+  - Max sleep value is decreased since sleep time increases are more granular
+  - Request count variance, I'm not sure, probably about the same
 
-I played around with different jitter values. I decided making it proportional based on the current sleep value was reasonable. From zero to 1% was not enough jitter, 0 to 10% seems reasonable but it still a magic number.
-
-### Rate limit increase logic
-
-There's a scenario we want to avoid: Imagine you have two clients, one is a "slow" client and sleeps for say 20 seconds, the other is the a "fast" client and is currently only sleeping for 4 seconds.
-
-When the "fast" client decreases it will trigger rate limit logic for all clients. Statistically it should be more likely that the 4 second client is the one to hit the rate limit, but the "slow" client still has a 1 in 5 chance of doubling and when that happens it will be 40 seconds.
-
-
-#### Rate limit increase logic - Don't double on first 429
-
-One way to mitigate this that i've tried is to not double the first time a rate limit is hit, but instead first see if sleeping for the original time value will succeed and if not, only then doubling it. In that scenario if the 20 second client hit a rate limit then it would first try sleeping for 20 seconds to see if it was no longer rate limited.
-
-This decreases (but does not eliminate) the likelyhood that the slow client will double instead of the fast client.
-
-The downside is it increases the total number of rate limits that the server ends up seeing. In the worst case scenario, the system will sit and hover in and out of this rate limiting zone with none of the clients ever fully hitting the scenario where it increases it's rate limit. Experimentally the system does seem to eventually get itself out of this zone, but it might linger there for awhile. On one test with 25 total threads (5 processes with 5 threads) the ratio of 429 requests ended up being around 2% which seemed okay.
-
-
-#### Rate limit increase logic - Don't double dip
-
-When a client is hitting a 429 rate limit request it will trigger the multiplication logic. Even though the system uses jitter, typically each process will group it's requests close together, so it's likely that more than one request will be rate limited.
-
-Imagine a process with 5 threads. Thread 1 and 3 might both be rate limited at about the same time. In this scenario you don't want to double the rate, and then turn around and double again.
-
-To avoid this scenario we record the first thread that is being rate limited and only perform the rate increase logic on that thread.
-
-### Rate limit reduction
-
-The goals in rate reduction logic are:
-
-- Minimize the number of 429 responses from the server, if every other request is being rate limited (50%) then that means we're hammering the server and not doing a good job of spreading things out.
-- Allow a single client to "eat up" any available capacity. I.e. we don't want a scenario where there is only one client and they're only making one request an hour even though they have the capacity to make 4500
-- Have all processes behave equitably over time: If we have one process sleeping for 100 seconds and one process sleeping for 1 second, that's not a very good division of labor. Ideally the 100 seconds should come down and the 1 second should rise. This is extremely hard.
-
-Now you know the goals, what can we do to affect rate limit reduction.
-
-#### Rate limit reduction logic process
-
-The actual logic of the rate limit is discuessed in the sections under this one, but this is a meta section that explains how i've been tuning the logic (even though the actual logic might not exactly match what i've put here).
-
-Here is how I think of the rate reduction logic. Let's start with a magic number:
+Here's experimental results from a 30 minute run (multiplier=1.2):
 
 ```
-@sleep_for -= 1
+max_sleep_val: [33.35, 134.88, 134.88, 33.35, 134.88, 33.35, 33.35, 134.88, 33.35, 134.88]
+retry_ratio: [0.80, 0.81, 0.80, 0.80, 0.82, 0.81, 0.80, 0.79, 0.80, 0.79]
+request_count: [1257.00, 738.00, 1016.00, 1335.00, 598.00, 1135.00, 1350.00, 1068.00, 1233.00, 1465.00]
 ```
 
-In this scenario the sleep value would decrease by 1 after every successful request. How do we know this is a good or bad number? We check to see if it meets our goals. In this case the code would result in a lot of 429 responses because each client is reduced too quickly. That means we need a smaller number. Let's try:
+Sleep values are WAY down. Which is good. Retry ratio is up, which is bad. This means that we're only succeeding for 20% of the requests that we make. Variance is a lower with a stdev of 275 requests (down from 387).
 
+- Increasing the multiplier (to 3) Guess:
+  - Max sleep value goes up
+  - Retry ratio goes down
+  - Request count variance is about the same, maybe a little higher
 
-```
-@sleep_for -= 1.0/2.0
-```
-
-Now we're reducing by a second, good or bad? Still bad. Still hitting 429s. In this scenario we know we need a number less than one, but we're dividing by another magic number, is there something more clever we could do? We could figure out the maximum number of requests in an hour and use that, it's still a magic number but at least it represents something to us in terms of requests:
-
-```
-@sleep_for -= 1.0/4500.0
-```
-
-Now the 429s aren't a huge problem, but the distribution isn't equitable and when there are 4500 requests avaialble it takes a long time to get a high sleep value down to 0.
-
-Now here's the fun part, we have metrics and data coming from the server. We want to ask ourselves when a given metric is high do we want rate reduction to increase or decrease. Based on that we can put it on the numerator or denominator.
-
-We have `ratelimit_remaining` value returned after every request letting us know how many more requests are availabe in the system, when it is high at (4500) then we want to reduce by a lot, when it is low (1) we want to reduce by a little. We can use it in the numerator:
+Here's the experimental results for a 30 minute run (multiplier=3):
 
 ```
-@sleep_for -= ratelimit_remaining/4500.0
+max_sleep_val: [1847.50, 641.35, 1847.50, 641.35, 641.35, 1847.50, 1847.50, 641.35, 641.35, 1847.50]
+retry_ratio: [0.70, 0.53, 0.52, 0.53, 0.51, 0.56, 0.64, 0.55, 0.53, 0.57]
+request_count: [43.00, 508.00, 838.00, 1080.00, 551.00, 283.00, 77.00, 705.00, 372.00, 416.00]
 ```
 
-Now we handle the case where we can "eat up" excess capacity at high values. What about equity?
+Max sleep value is up, retry ratio went down (previously was 60%, now averaging 56%, so not a huge difference). Stdev for request count is 325.
 
-In the scenario where there is a 20 second client and a 4 second client the 4 second client will fire five times more often than the 20 second client. This means that the fast client keeps tending towards zero and causing rate limit events and at every event there is a 1 in 5 chance that our 20 second client doubles to 40, not good. We want both clients to decrease (relative to each other) proportionally. To do that we could use `@sleep_for`. When it is high, we want to decrease by a lot, when it is low we want to sleep for a little:
+It looks like our intuition about sleep value and retry ratio is roughly correct. Unfortunately tuning one value to be better, makes the other worse. If we want both sleep value and retry ratio to be better then, we'll have to adopt a new approach. Intuition about request variation is mixed. They're in the same ballpark though.
 
-```
-@sleep_for -= (ratelimit_remaining*@sleep_for)/4500.0
-```
+If we want to make this better we could use an algorithm with a low retry rate and find some way to bring down the sleep values, or a low sleep value and find a way to bring down the retry rate. The 1.2 multiplier had a fairly low sleep value, but a higher retry ratio. Let's start there.
 
-Which is the same as:
+To decrease retry ratio, we'll have to slow down request rate. One way to do this is via sleeping before all requests, not just rate-limited-requests.
 
-```
-@sleep_for -= ratelimit_remaining/(4500.0/sleep_for)
-```
+## Exponential sleep increase, gradual decrease
 
-Let's say that there are 100 requests left in the queue, our "slow" client (20 seconds) will be decreased by 0.4 seconds, while the "fast" client (4 seconds) will be reduced by 0.08 seconds. This helps with our equity issue, but now in the case where we are sleeping for 20 seconds, our reduction is now happening 20x faster. Basically while the ratio between clients is reasonable, the rate is too fast, we could magic number to decrease it:
+Use the same exponential backoff algorithm as before, but now after we make a successful request instead of not sleeping at all, we preserve the sleep value and before the next request. If it's successful then we decrease the amount we have to sleep on every successful request.
 
-```
-@sleep_for -= (ratelimit_remaining*@sleep_for)/(4500.0*20)
-```
+This is implemented in: ()
 
-But magic numbers suck and this is hard coded.
+Like before, when the client is rate limitied it has an exponential increase, but now, after a successful request it will continue to sleep the same amount, but slightly less. Since before tuning the exponential multiplier affected the system a large amount, the amount decreased will have a large impact:
 
-Another issue that we have is clients are "flappy", in the case of 40 second slow and 4 second fast, the "fast" client causes way more 429 rate limit events but the "cost" is amortized across both clients. So may be the fast client might have rate limited 50 times but the slow client only rate limited 6 times. We want a client with a lot of rate limits to decrease it's speed to give a chance for the "slow" client to have a meaningful decrease before the next rate limit event is fired. In that case we would add it to the denominator:
+We can start with a small value. In a 4500 GCRA system, when it runs out of requests another will be added in  1 (hour) / (4500 requests per hour) * 3600 (seconds/hour) is 0.8 seconds for the next request to become available. For a 30 minute run (multiplier=1.2 decrease=0.8)
 
 ```
-@sleep_for -= (ratelimit_remaining*@sleep_for)/(4500.0*rate_limit_count)
+max_sleep_val: [184.55, 208.81, 208.81, 184.55, 208.81, 184.55, 184.55, 208.81, 184.55, 208.81]
+retry_ratio: [0.51, 0.56, 0.45, 0.51, 0.58, 0.67, 0.45, 0.45, 0.43, 0.55]
+request_count: [43.00, 39.00, 53.00, 41.00, 38.00, 33.00, 3720.00, 51.00, 68.00, 49.00]
 ```
 
-> Note: This has been replaced with a time based approach. The benefit is that the value has a natural reset point and will not grow indefinetly like the rate limit count
+Max sleep value went up, retry ratio went down and variance is off the charts (stdev=1161). We still need to decrease all these values. We can try using a different decrease rate.
 
-Is this perfect? Could we do better? Maybe. At the time of reading this might not even be what we're doing anymore. The idea of this section is to give you insight into how to think about how to make an affect by modifying this number (add to numerator to make it go faster, add to denominator to make it go slower). We can also do things like use polynomials, exponents, more magic numbers, etc. But in general it helps to first set a goal for desired behavior, then determine a metric that correlates to that behavior, and then figure out the best place to use it in the reduction calcualation.
+Here's the chart:
 
-#### Rate Reduction Logic - remainging versus sleep value
+![](https://www.dropbox.com/s/elb9z2sbxegr71k/Screenshot%202020-04-07%2011.37.02.png?raw=1)
 
-This is the hardest part. We want a value that is proportional to the number of remaining requests. If there are a lot of remaining requests then we want to remove a lot of sleep time, when there are fewer requests remove less sleep time.
+You can see that this does have some desired properties. You can see some clients beginning to come down, but you also see one client essentially riding the floor and not sleeping at all. That's where the high variance comes from.
 
-We also have another problem which is that in the fast/slow client problem - say one client is sleeping for 4 seconds (fast) and another is sleeping for 20 seconds (slow). The rate
-decrement code will only be called for the slow client one fifth as often as the fast client. That means that the fast client continues to decrement faster and faster while the slow client...keeps on being slow.
-
-Ideally to counter this we would also make the reduction value based off of the sleep time. Ideally each time the 20 second time fires it would decrement by 5x as much as the 4 second client.
-
-There are other approaches but this is one. It unfortunately involves magic values and would be ideal if we had some logic around them.
-
-
-#### Rate Reduction Logic - Make flappy clients slower
-
-When dealing with the fast/slow client problem, the slow client might tend to keep going from 4 towards zero only to be increased back up to 4 again and again and again while the slow client is taking forever to come down from a high value.
-
-We can use the time since a rate limit event to be a proxy for flappy-ness. When a client is flappy then we want it to take longer to reduce it's rate so that it gives a chance for other clients who have a higher sleep value to come down before potentially triggering their rate limiting logic.
-
-The goal is that eventually all clients will be proportionally rate limited, however I'm not sure if the current logic will meet that goal.
-
-Right now we're using a variant of exponential decay to generate a time factor.
-
-```ruby
-time_factor = 1.0/(1.0 - Math::E ** -(seconds_since_last_multiply/3600.0))
-```
-
-When a client was recently rate limited, this value is high:
-
-```ruby
-1.0/(1.0 - Math::E ** -(30/3600.0))
-# => 120
-```
-
-The longer the client runs without rate limiting, the lower the value will be (tending to 1):
-
-```ruby
-1.0/(1.0 - Math::E ** -(3600/3600.0))
-# => 1.5819767068693265
-```
-
-This term is used in the denominator of our rate reduction logic to slow reduction when high and to speed it up when low.
-
-Before this logic was added we would see the flappy behavior where one client might be at 5 or 10x more rate limit events than other clients. With this logic added in there is still variance, but it seems to allow them to average out.
+Somehow we need to make the clients that have low sleep time decrease very slowly, and the clients with high sleep time decrease faster. We can accomplish this via decreasing and taking sleep time into account:
 
 ```
-10019#70135134458660: #status=200 #remaining=111 #rate_limit_count=14 #sleep_for=13.768209096835815
-10019#70135134458820: #status=200 #remaining=111 #rate_limit_count=14 #sleep_for=13.7439508236652
-10020#70135134458380: #status=200 #remaining=112 #rate_limit_count=20 #sleep_for=27.21327764412642
-10020#70135134458820: #status=200 #remaining=111 #rate_limit_count=20 #sleep_for=27.179412231947065
-10022#70135134458240: #status=200 #remaining=111 #rate_limit_count=22 #sleep_for=15.041531519886027
-10019#70135134458240: #status=200 #remaining=113 #rate_limit_count=14 #sleep_for=13.7197352912616
-10019#70135134458380: #status=200 #remaining=112 #rate_limit_count=14 #sleep_for=13.69512687716775
-10019#70135134458520: #status=200 #remaining=112 #rate_limit_count=14 #sleep_for=13.670779984941674
-10020#70135134458520: #status=200 #remaining=112 #rate_limit_count=20 #sleep_for=27.145890956861
-10022#70135134458660: #status=200 #remaining=111 #rate_limit_count=22 #sleep_for=15.024666772424336
-10018#70135134458380: #status=200 #remaining=112 #rate_limit_count=22 #sleep_for=15.439727858037362
-10022#70135134458520: #status=200 #remaining=111 #rate_limit_count=22 #sleep_for=15.00782093392192
-10020#70135134458660: #status=200 #remaining=112 #rate_limit_count=20 #sleep_for=27.11210940367024
-10018#70135134458240: #status=200 #remaining=111 #rate_limit_count=22 #sleep_for=15.422260691167663
-10018#70135134458660: #status=200 #remaining=111 #rate_limit_count=22 #sleep_for=15.404969065544233
-10018#70135134458820: #status=200 #remaining=110 #rate_limit_count=22 #sleep_for=15.387696827501047
-10018#70135134458520: #status=200 #remaining=109 #rate_limit_count=22 #sleep_for=15.3705993865816
-10021#70135134458660: #status=200 #remaining=112 #rate_limit_count=23 #sleep_for=41.49060981439041
-10019#70135134458660: #status=200 #remaining=111 #rate_limit_count=14 #sleep_for=13.646476376079557
-10019#70135134458820: #status=200 #remaining=110 #rate_limit_count=14 #sleep_for=13.62243258436932
-10022#70135134458380: #status=200 #remaining=110 #rate_limit_count=22 #sleep_for=14.990993983177825
-10022#70135134458820: #status=200 #remaining=109 #rate_limit_count=22 #sleep_for=14.974337323196517
-10020#70135134458240: #status=200 #remaining=108 #rate_limit_count=20 #sleep_for=27.078369889745673
-10022#70135134458240: #status=200 #remaining=111 #rate_limit_count=22 #sleep_for=14.957850426547745
-10019#70135134458240: #status=200 #remaining=113 #rate_limit_count=14 #sleep_for=13.598647384618834
-10019#70135134458380: #status=200 #remaining=112 #rate_limit_count=14 #sleep_for=13.574256159944836
-10019#70135134458520: #status=200 #remaining=112 #rate_limit_count=14 #sleep_for=13.550124148993824
-10022#70135134458660: #status=200 #remaining=112 #rate_limit_count=22 #sleep_for=14.941079503342221
-10018#70135134458380: #status=200 #remaining=114 #rate_limit_count=22 #sleep_for=15.353676201398395
-10022#70135134458520: #status=200 #remaining=113 #rate_limit_count=22 #sleep_for=14.924176463904097
-10018#70135134458240: #status=200 #remaining=114 #rate_limit_count=22 #sleep_for=15.335996210621028
-10018#70135134458820: #status=200 #remaining=113 #rate_limit_count=22 #sleep_for=15.318336578620919
-10018#70135134458660: #status=200 #remaining=114 #rate_limit_count=22 #sleep_for=15.30085201262714
-10018#70135134458520: #status=200 #remaining=113 #rate_limit_count=22 #sleep_for=15.283232849703507
-10019#70135134458660: #status=200 #remaining=113 #rate_limit_count=14 #sleep_for=13.526035039395612
-10019#70135134458820: #status=200 #remaining=113 #rate_limit_count=14 #sleep_for=13.501774055912252
-10020#70135134458380: #status=200 #remaining=113 #rate_limit_count=20 #sleep_for=27.04587584587798
-10020#70135134458820: #status=200 #remaining=112 #rate_limit_count=20 #sleep_for=27.01191824620482
-10022#70135134458820: #status=200 #remaining=111 #rate_limit_count=22 #sleep_for=14.907141797839236
-10022#70135134458380: #status=200 #remaining=110 #rate_limit_count=22 #sleep_for=14.890427729762871
+decrease_value = (sleep_time) / some_value
 ```
 
+Where `some_value` is tunable.
 
-### Scratch/What-if
+### Exponential increase proportional decrease
 
-One potential method of adjusting the reduction logic could be to look at the delta of the "remaining" count before and after a request.
+When a rate limit is triggered, exponentially increase, when successful request reduce sleep value by an amount proportional to sleep value.
 
-Theoretically if there are 100 requests remaining in the ideal system we would expect there to be 100 requests remaing after the client has slept and then made a request. Since we don't want to get stuck on a specific (possibly high) value we could aim for one less, say 99 requests remaining.
-
-The idea here is that if the value is falling we don't want to decrement. If the value is rising then we want to decrement, presumably more based off of how much the count was before so a gain of 100 request would decrement more than a gain of 10 requests. How much should we decrement then? I've not really explored this and i'm sure there are major hurdles such as smoothing and magic numbers etc. Wanted to list it as an idea though incase someone thinks they have an algorithm that might fit.
-
-Initially I was thinking of this kind of like a PID controller, but i'm not sure that's the best mental model for the problem space.
-
-
-## How the F to test this?
-
-Right now this is only unit tested. This works well as long as you are confident in the existing logic, but does not work to test the behavior.
-
-This behavior is very hard to test. Why? While the rules are fairly simple (around 100 ish lines of Ruby code for the rate limiter) they have [emergent bevhavior]() that comes from these rules. To make things harder, to really test this emergent behavior, we must `sleep()` which causes code to run for extended periods. To make hard things harder, the code involves syncronizing multiple async clients and requires a server to fully test.
-
-Ideally we would test the "behavior" of the system and not the logic but without the ability to simulate running through an entire day in a few seconds, I don't know how we could do that.
-
-I tried timecop, but it does not affect sleep:
+For a 30 minute run (multiplier=1.2 decrease_divisor=4500)
 
 ```
-require 'timecop'
-Timecop.scale(100)
-sleep(100) # would expect this to only sleep for 1 second due to timecop but sleeps for 100
+max_sleep_val: [17.27, 17.20, 17.20, 17.27, 17.27, 17.27, 17.20, 17.20, 17.20, 17.27]
+retry_ratio: [0.03, 0.06, 0.05, 0.07, 0.02, 0.01, 0.03, 0.03, 0.03, 0.04]
+request_count: [244.00, 141.00, 172.00, 115.00, 336.00, 418.00, 193.00, 202.00, 186.00, 230.00
 ```
 
-Behavior I want to test;
+Sleep value is down, retry ratio is orders of magnituded better. Request variance is 91 wich is the best we've seen yet. Here's the chart:
 
-- One client consumes all available requests "quickly"
-- Fast/Slow client allows "slow" client to come down
-- Flappy clients are encouraged to be not flappy
-- When fast/slow clients both hit a rate limit the "fast" client is more likely to be chosen.
-- Percent/rate of rate limits received by the server is within some reasonable bounds (initial simulations of this behavior look like rate limits account for 2-3% of requests)
+![](https://www.dropbox.com/s/rq0gpqtglzubrto/Screenshot%202020-04-07%2011.54.06.png?raw=1)
 
-TODO:
+What is especially interesting here to me is that clients that are "high" can move to low values and clients that are low can move to high values.
 
-- Rate multiply headers
-- Minimum sleep value after reduction
+The value 4500 is a magic, tunable number. If we increase it I would expect retry ratio to go down, if I decrease it I would expect retry ratio to go up.
+
+For a longer run, for a 120 minute run (multiplier=1.2 decrease_divisor=4500)
+
+```
+max_sleep_val: [19.68, 13.55, 13.55, 19.68, 13.55, 19.68, 19.68, 13.55, 19.68, 13.55]
+retry_ratio: [0.01, 0.00, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.00]
+request_count: [882.00, 1567.00, 935.00, 727.00, 737.00, 642.00, 736.00, 1023.00, 747.00, 1075.00]
+```
+
+![](https://www.dropbox.com/s/bjepltsv4wwzujd/Screenshot%202020-04-07%2013.03.43.png?raw=1)
+
+This looks outstanding. The optimal calculated sleep value would be 8 seconds (0.8 seconds per client * 10 clients).
+
+Now the question is: What (if anything is bad about this client)? In this simulation the workload is steady. That is, requests are spread out relatively even throughout the entire simulation. Instead, what if there was a flury of activity, say from a bunch of jobs being enqueued, and then there's a period of domancy, and then a period of activity.
+
+We can test by seeing how long it would take to consumer all requests, given an initial sleep value that is higher than optimal, say 10 seconds. In that case decrease per successfull request will be (10/4500) which is 0.002. With that decrease rate, it will take 500 requests to decrease by 1 second and a thousand requests to decrease by 2 seconds (though longer since it's proportional). At a rate of one request every 10 seconds it would take 83 minutes (over an hour) to decrease the value by only 1 second.
+
+It will eventually find a steady state, but it will take a LONG time.
+
+Here is a chart:
+
+![](https://www.dropbox.com/s/ok5owh6d7za5x3p/Screenshot%202020-04-07%2016.41.22.png?raw=1)
+
+It takes nearly 7 hours to fully consume all available requests and find a new steady state. Not good.
+
+Pros:
+- All metrics are good
+
+Cons:
+- Cannot handle a change in work load well.
+
+
+As a comparison I added a test to see how long a client set for an initial sleep of 10 seconds (if it retains sleep value), how long it would take to clear 4500 requests. The ExponentialBackoff client which does not preserve sleep takes:
+
+```
+Time to clear workload: 321.75476813316345 seconds
+```
+
+This is roughly 5 minutes. 7 hours is not acceptable for the proportional client. Instead we need a way to decrease faster when there's lots of remaining requests, and slower when there are fewer.
+
+### Exponential increase proportional decrease based on sleep value and remaining requests
+
+Same exponential increase behavior, now we add the rate_limit_remainging value to our decrease:
+
+```
+decrease_value = (sleep_time * rate_limit_remaining) / some_value
+```
+
+For a 30 minute run (multiplier=1.2, decrease_divisor=4500, with rate limit)
+
+```
+max_sleep_val: [13.14, 17.18, 17.18, 17.18, 13.14, 17.18, 13.14, 17.18, 13.14, 13.14]
+retry_ratio: [0.02, 0.03, 0.04, 0.05, 0.04, 0.06, 0.07, 0.11, 0.05, 0.02]
+request_count: [217.00, 155.00, 143.00, 123.00, 162.00, 117.00, 105.00, 73.00, 116.00, 218.00]
+
+Time to clear workload: 314.27748004486085 seconds
+```
+
+![](https://www.dropbox.com/s/5h6j2dnvddj5bq1/Screenshot%202020-04-07%2020.30.50.png?raw=1)
+
+The retry ratio is higher, but still orders of magnitude better than regular exponential. The time to clear 4500 requests is pretty low (5.2 minutes), and the variance is within reason with a stdev of 46.8.
+
+
+For a 180 minute run (multiplier=1.2, decrease_divisor=4500, with rate limit)
+
+```
+max_sleep_val: [25.11, 35.71, 35.71, 25.11, 35.71, 25.11, 35.71, 25.11, 25.11, 35.71]
+retry_ratio: [0.02, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.02, 0.01]
+request_count: [754.00, 2034.00, 1331.00, 1221.00, 1110.00, 1360.00, 2213.00, 1027.00, 996.00, 2170.00]
+```
+
+Screenshot of a 5 hour run:
+
+![](https://www.dropbox.com/s/ppptbgk215ihdzy/Screenshot%202020-04-07%2021.22.41.png?raw=1)
+
+720 minute run:
+
+```
+max_sleep_val: [33.55, 36.63, 36.63, 33.55, 36.63, 33.55, 36.63, 33.55, 36.63, 33.55]
+retry_ratio: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
+request_count: [7825.00, 4059.00, 5336.00, 8213.00, 3949.00, 5527.00, 5594.00, 7424.00, 4011.00, 7121.00]
+```
+
+![](https://www.dropbox.com/s/xu7z6wxj3x2h80j/Screenshot%202020-04-07%2022.07.01.png?raw=1)
+
+## Winner
+
+The "Exponential increase proportional decrease based on sleep value and remaining requests" exhibits excelent behavior in all of our criteria. If we wanted to improve it, the next step would be to make another rate throttling client, and benchmark it against this one.
+
+## Happy accidents - A race condition
+
+You might have noticed in the charts that there are large periods of increases, which make sense given we're multiplying exponentially when a rate limit is triggered. You might have also seen a line where a value suddenly drops, like this one (look at white):
+
+![](https://www.dropbox.com/s/lvjv89kfsgadht5/Screenshot%202020-04-07%2021.53.25.png?raw=1)
+
+What's going on there? When I coded the "Exponential sleep increase, gradual decrease" I wanted to make it as simple as possible. I wanted each thread to be independent and not use any mutexes for updating values. I knew this would cause a race condition, but I thought that was fine (it is fine, but the behavior is still surprising enough to explain). The logic flow looks something like this:
+
+```
+local_sleep_value = @shared_sleep_value
+
+make_request
+sleep(local_sleep_value)
+update(local_sleep_value)
+
+@shared_sleep_value = local_sleep_value
+```
+
+Since we're calling it in a loop, it ends up looking kind of like this:
+
+```
+local_sleep_value = @shared_sleep_value
+
+#...
+
+@shared_sleep_value = local_sleep_value # <====
+local_sleep_value = @shared_sleep_value # <====
+
+#...
+
+@shared_sleep_value = local_sleep_value
+```
+
+What this ends up meaning is that the `@shared_sleep_value` has a very small time window where it can be over-written by another thread for it to actually affect another thread. Here's some logs:
+
+```
+7397#70117824783640: Setting sleep_for: 15.75507386941004
+7397#70117824783640: Getting sleep_for: 15.75507386941004
+7397#70117824782680: # Make request
+7397#70117824782680: Setting sleep_for: 9.444155235725503
+7397#70117824782680: Getting sleep_for: 9.444155235725503
+7397#70117824782360: # Make request
+7397#70117824782360: Setting sleep_for: 9.44043609284105
+7397#70117824782360: Getting sleep_for: 9.44043609284105
+7397#70117828787280: # Make request
+7397#70117828787280: Setting sleep_for: 9.442902221532192
+7397#70117828787280: Getting sleep_for: 9.442902221532192
+7397#70117828787700: # Make request
+7397#70117828787700: Setting sleep_for: 9.444155235725503
+7397#70117828787700: Getting sleep_for: 9.444155235725503
+7397#70117828787700: Getting sleep_for: 9.444155235725503
+7397#70117824782680: # Make request
+7397#70117824782680: Setting sleep_for: 9.442056534562008
+7397#70117824782680: Getting sleep_for: 9.442056534562008
+7397#70117824782360: # Make request
+7397#70117824782360: Setting sleep_for: 9.438338218153753
+7397#70117824782360: Getting sleep_for: 9.438338218153753
+7397#70117828787280: # Make request
+7397#70117828787280: Setting sleep_for: 9.440803798816296
+7397#70117828787280: Getting sleep_for: 9.440803798816296
+7397#70117824783640: # Make request
+7397#70117824783640: Setting sleep_for: 15.751572741883505 # <== Swap happens here
+7397#70117828787700: # Make request
+7397#70117828787700: Setting sleep_for: 9.442056534562008
+7397#70117828787700: Getting sleep_for: 9.442056534562008 # <== Same process, different value
+```
+
+Race conditions are bad, unpredictability is bad. Why is this a "happy" accident? In general we want some controlled randomness. We also want to not leave really high values high for too long, and this process is more likely to accidentally reduce a value than to increase it. Why? Values that are low indicate threads that are firing rapidly, the more often a thread fires, the more often it will set this value. So while we do see random jump ups, the jump down is more likely.
+
+We could fix this by storing this data as a thread local. But I like this behavior. In general we don't want a process or a thread "stuck" in one position for too long and this race condition behavior seems to reduce variance.
+
+

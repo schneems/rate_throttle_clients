@@ -19,13 +19,14 @@ module UniquePort
 end
 
 class RateThrottleDemo
+  MINUTE = 60
   THREAD_COUNT = ENV.fetch("THREAD_COUNT") { 5 }.to_i
   PROCESS_COUNT = ENV.fetch("PROCESS_COUNT") { 2 }.to_i
-  RUN_TIME=ENV.fetch("RUN_TIME") { 10 }.to_i # Seconds
+  DURATION=ENV.fetch("DURATION") { 30 }.to_i * MINUTE #
   TIME_SCALE = ENV.fetch("TIME_SCALE", 1).to_f
   RACKUP_FILE = Pathname.new(__dir__).join("../server/config.ru")
 
-  def initialize(client:,thread_count: THREAD_COUNT, process_count: PROCESS_COUNT, duration: RUN_TIME, log_dir: nil, time_scale: TIME_SCALE, stream_requests: false, json_duration: 30, rackup_file: RACKUP_FILE)
+  def initialize(client:,thread_count: THREAD_COUNT, process_count: PROCESS_COUNT, duration: DURATION, log_dir: nil, time_scale: TIME_SCALE, stream_requests: false, json_duration: 30, rackup_file: RACKUP_FILE, starting_limit: 0, remaining_stop_under: nil)
     @client = client
     @thread_count = thread_count
     @process_count = process_count
@@ -35,12 +36,23 @@ class RateThrottleDemo
     @stream_requests = stream_requests
     @json_duration = json_duration
     @rackup_file = rackup_file
+    @starting_limit = starting_limit
+    @remaining_stop_under = remaining_stop_under
     @port = UniquePort.call
     @threads = []
     @pids = []
     Timecop.scale(@time_scale)
 
     FileUtils.mkdir_p(@log_dir)
+  end
+
+  def print_results
+    puts
+    puts "## Raw #{@client.class} results"
+    puts
+    self.results.each do |key, value|
+      puts "#{key}: [#{ value.map {|x| "%.2f" % x}.join(", ")}]"
+    end
   end
 
   def results
@@ -63,7 +75,7 @@ class RateThrottleDemo
   end
 
   def call
-    WaitForIt.new("bundle exec puma #{@rackup_file.to_s} -p #{@port}", env: {"TIME_SCALE" => @time_scale.to_i.to_s}, wait_for: "Use Ctrl-C to stop") do |spawn|
+    WaitForIt.new("bundle exec puma #{@rackup_file.to_s} -p #{@port}", env: {"TIME_SCALE" => @time_scale.to_i.to_s, "STARTING_LIMIT" => @starting_limit.to_s}, wait_for: "Use Ctrl-C to stop") do |spawn|
       @process_count.times.each do
         @pids << fork do
           run_threads
@@ -134,10 +146,18 @@ class RateThrottleDemo
         next_json_time = begin_time + @json_duration
       end
 
+      request = nil
       @client.call do
         request_count += 1
 
-        request = Excon.get("http://localhost:#{@port}", read_timeout: 120)
+        request = begin
+          Excon.get("http://localhost:#{@port}")
+        rescue Excon::Error::Timeout => e
+          puts e.inspect
+          puts "retrying"
+          retry
+        end
+
 
         case request.status
         when 200
@@ -146,6 +166,7 @@ class RateThrottleDemo
         else
           raise "Got unexpected reponse #{request.status}. #{request.inspect}"
         end
+
 
         if @stream_requests
           status_string = String.new
@@ -161,10 +182,12 @@ class RateThrottleDemo
 
         request
       end
+
+      break if @remaining_stop_under && (request.headers["RateLimit-Remaining"].to_i <= @remaining_stop_under)
     end
 
     @threads.each {|t|
-      if t != Thread.current && t.backtrace_locations.first.label == "sleep"
+      if t != Thread.current && t.backtrace_locations && t.backtrace_locations.first.label == "sleep"
         t.raise(TimeIsUpError)
       end
     }
