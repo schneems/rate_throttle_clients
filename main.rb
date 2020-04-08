@@ -1,14 +1,24 @@
-this_dir = File.expand_path("..", __FILE__)
+require_relative 'lib/rate_throttle_demo.rb'
 
-server_dir = File.join(this_dir, "server")
-client_file = File.join(this_dir, "client/script.rb")
+require 'pathname'
 
-fork do
-  out = `cd #{server_dir} && puma`
-  puts out
+client_dir = Pathname.new(__dir__).join('client')
+client_dir.entries.each do |code|
+  code = client_dir.join(code)
+  load code.to_path if code.file?
 end
 
-sleep 4
+begin
+  HOUR = 3600
+  MINUTE = 60
+  duration = ENV.fetch("DURATION", 6*HOUR).to_i * MINUTE
 
-exec("ruby #{client_file}")
+  puts "=== Starting ==="
+  client = ExponentialIncreaseSleepAndRemainingDecrease.new
+  demo = RateThrottleDemo.new(client: client, stream_requests: true, duration: duration)
+  demo.call
 
+  puts "===== Done ====="
+ensure
+  puts demo.print_results
+end

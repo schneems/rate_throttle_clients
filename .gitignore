@@ -1,2 +1,4 @@
 logs/*
 spec/examples.txt
+.DS_Store
+

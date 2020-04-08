@@ -9,38 +9,43 @@ class RateThrottleInfo
   end
 end
 
-
-# Actual exponential backoff class with some extra jazz so it reports
-# kinda like the HerokuRateThrottle class
-#
-# Essentially it doesn't throttle at all until it hits a 429 then it exponentially
-# throttles every repeatedly limited request. When it hits a successful request it stops
-# rate throttling again.
-#
-class ExponentialBackoffThrottle
-  MAX_LIMIT = 4500.to_f
-  MIN_SLEEP = 3600/MAX_LIMIT
+class ExponentialIncreaseProportionalDecrease
+  MAX_LIMIT = 4500.to_f # requests per hour
+  MIN_SLEEP = 3600/ MAX_LIMIT # Seconds per request for new limit update
 
   attr_reader :log
   attr_accessor :minimum_sleep, :multiplier
 
-  def initialize(log = ->(req, throttle) {})
+  def initialize(log = ->(req, throttle) {}, sleep_for: 0)
     @minimum_sleep = MIN_SLEEP
     @multiplier = 1.2
     @log = log
+    @sleep_for = sleep_for
+    @decrease_divisor = MAX_LIMIT
   end
 
   def call(&block)
-    sleep_for = @minimum_sleep
+    sleep_for = @sleep_for
+    sleep(sleep_for + jitter(sleep_for))
 
     while (req = yield) && req.status == 429
+      sleep_for += @minimum_sleep
+
       log.call(req, RateThrottleInfo.new(sleep_for: sleep_for))
 
       sleep(sleep_for + jitter(sleep_for))
       sleep_for *= multiplier
     end
 
-    sleep(0) # reset value for chart
+    decrease_value = sleep_for / @decrease_divisor
+
+    if sleep_for >= decrease_value
+      sleep_for -= decrease_value
+    else
+      sleep_for = 0
+    end
+
+    @sleep_for = sleep_for
 
     req
   end

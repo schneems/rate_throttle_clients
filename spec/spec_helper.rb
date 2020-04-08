@@ -32,3 +32,7 @@ class FakeResponse
     }
   end
 end
+
+def fixture_path(path)
+  Pathname.new(__dir__).join("fixtures").join(path)
+end

@@ -32,29 +32,27 @@ raise "#{log_dir} is not a directory" unless log_dir.directory?
 # puts log_dir
 STDOUT.sync=true
 
-process_count = 0
 entry_count = 0
 log_files = log_dir.entries.map do |entry|
   log_dir.join(entry)
 end.select do |file|
   next if file.basename.to_s == "chart.png"
   next if !file.file?
+  next if !file.basename.to_s.end_with?("-chart-data.txt")
   true
 end
 
 log_files.each do |entry|
-  g.data entry.basename, entry.each_line.map(&:to_f)
+  g.data entry.basename.to_s.gsub("-chart-data.txt", ""), entry.each_line.map(&:to_f)
 end
-
 
 entry_count = log_files.first.each_line.count
 
-
-g.title = "API Client Rate Limit Throttling Sleep Values\nOver Time for #{log_files.count} PIDs"
+g.title = "API Client Rate Limit Throttling Sleep Values\nOver Time for #{log_files.count} clients"
 g.y_axis_label = "Sleep time in seconds"
 g.x_axis_label = "Time duration in hours"
 
-label_hash = { 0 => '0', entry_count - 1 => ((entry_count * time_scale) / 3600.0).to_s }
+label_hash = { 0 => '0', entry_count - 1 => "%.2f" % ((entry_count * time_scale) / 3600.0)}
 hours = (entry_count * time_scale) / 3600.0
 
 if hours >= 1
