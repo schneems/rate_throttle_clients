@@ -1,10 +1,10 @@
-# Rate Limit GCRA Client Demo
+# Rate Throttle Clients
 
 ## What is Rate Limiting (server side)?
 
 The Heroku rate limit algorithm follows [Generic Cell Rate Algorithm](https://brandur.org/rate-limiting). Basically, the idea is that you start with a bucket of requests, 4,500. When you make an API request, then the number goes down. The bucket is also refilled at a rate of 4,500 an hour. Rather than waiting for the end of the hour and adding 4,500 to your limit, the algorithm continuously updates the value throughout the hour. This encourages clients to spread out their requests rather than wait for a fixed time period and then assault the API server.
 
-## What is rate throttling (client side)?
+## What is Rate Throttling (client side)?
 
 While the server will reject requests if they are over the limit, the client can use this information to behave differently. For example they could "smooth out" their requests over time. When they detect a client is rate limited, they can retry the request after sleeping for some time. Without rate throttling these requests would fail and everyone (the client and server) would have a bad time.
 
@@ -109,21 +109,21 @@ This task runs multiple clients quietly for 30 (simulated) minutes and then outp
 
 One method of writing a retry algorithm is to write the simplest thing that could work, then observe what could be better about it and iterate until better values are achieved. What follows are a list of clients, some are theoretical and some are implemented in the [clients directory](https://github.com/schneems/rate-limit-gcra-client-demo/tree/master/client).
 
-### Retry Only
+### Client Throttle Strategy - Retry Only
 
 A primitive rate throttling algorithm is nothing more than a retry algorithm. When a request comes back as rate limited (429 response) then it can be retried.
 
 - Pros: Super simple
 - Cons: Extremely high retry ratio. Is essential a DDoS to the server and cause your account to get suspended.
 
-### Retry with backoff
+### Client Throttle Strategy - Retry with backoff
 
 A step up from "retry only" is to make requests, then when a 429 is hit, sleep before the next request is made.
 
 - Pros: Still very simple
 - Cons: Difficult to find the "right" value to sleep. This violates several requirements of what a rate throttling algorithm must be able to do.
 
-### Retry with exponential backoff
+### Client Throttle Strategy - Retry with exponential backoff
 
 Instead of hard-coding a sleep value, clients can instead sleep for progressively higher values, some multiplier of the value that was previously tried. A common value is 2x the prior sleep request, and a good place to start sleeping is the minimum amount of time to sleep for 1 request to become available via the server. As soon as a successful request is made, stop sleeping until the next 429 is hit
 
@@ -235,7 +235,7 @@ decrease_value = (sleep_time) / some_value
 
 Where `some_value` is tunable.
 
-### Exponential increase proportional decrease
+### Client Throttle Strategy - Exponential increase proportional decrease
 
 When a rate limit is triggered, exponentially increase, when successful request reduce sleep value by an amount proportional to sleep value. Implemented in https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/client/exponential_increase_proportional_decrease.rb
 
@@ -247,11 +247,11 @@ retry_ratio: [0.03, 0.06, 0.05, 0.07, 0.02, 0.01, 0.03, 0.03, 0.03, 0.04]
 request_count: [244.00, 141.00, 172.00, 115.00, 336.00, 418.00, 193.00, 202.00, 186.00, 230.00
 ```
 
-Sleep value is down, retry ratio is orders of magnituded better. Request variance is 91 wich is the best we've seen yet. Here's the chart:
+Sleep value is down, retry ratio is orders of magnituded better. Request variance is 91 which is the best we've seen yet. Here's the chart:
 
 ![](https://www.dropbox.com/s/rq0gpqtglzubrto/Screenshot%202020-04-07%2011.54.06.png?raw=1)
 
-What is especially interesting here to me is that clients that are "high" can move to low values and clients that are low can move to high values.
+What is especially interesting here to me is that clients that are "high" can move to low values and clients that are low can move to high values. (Turns out this is a "happy accident", see below).
 
 The value 4500 is a magic, tunable number. If we increase it I would expect retry ratio to go down, if I decrease it I would expect retry ratio to go up.
 
@@ -294,7 +294,7 @@ Time to clear workload: 321.75476813316345 seconds
 
 This is roughly 5 minutes. 7 hours is not acceptable for the proportional client. Instead we need a way to decrease faster when there's lots of remaining requests, and slower when there are fewer.
 
-### Exponential increase proportional decrease based on sleep value and remaining requests
+### Client Throttle Strategy - Exponential increase proportional decrease based on sleep value and remaining requests
 
 Same exponential increase behavior, now we add the rate_limit_remainging value to our decrease (implemented in https://github.com/schneems/rate-limit-gcra-client-demo/blob/master/client/exponential_increase_sleep_and_remaining_decrease.rb):
 
