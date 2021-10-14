@@ -1,3 +1,5 @@
+# [moved](https://github.com/zombocom/rate_throttle_client)
+<!--
 # Rate Throttle Clients
 
 ## What is Rate Limiting (server side)?
@@ -417,3 +419,4 @@ We could fix this by storing this data as a thread local. But I like this behavi
 It's worth noting that this behavior only happens if you're running clients in threads. If you're only executing one client per process (which is likely the case for most people) there will be no race condition. If you instantiate one client per thread, there will be no race condition.
 
 
+-->
